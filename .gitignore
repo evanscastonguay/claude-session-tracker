@@ -1,0 +1,4 @@
+.build/
+ClaudeTracker.app/
+.DS_Store
+*.swp
