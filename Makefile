@@ -29,19 +29,20 @@ clean:
 	swift package clean
 	rm -rf $(BUNDLE)
 
-# Install app to ~/Applications
+# Install app to /Applications
 install: bundle
-	@mkdir -p ~/Applications
 	@pkill -f $(APP_NAME).app 2>/dev/null || true
 	@sleep 1
-	@rm -rf ~/Applications/$(BUNDLE)
-	@cp -R $(BUNDLE) ~/Applications/
-	@echo "Installed to ~/Applications/$(BUNDLE)"
+	@rm -rf /Applications/$(BUNDLE)
+	@cp -R $(BUNDLE) /Applications/
+	@codesign --force --deep --sign - --identifier "com.evanscastonguay.claude-tracker" /Applications/$(BUNDLE) 2>/dev/null || true
+	@/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister /Applications/$(BUNDLE) 2>/dev/null || true
+	@echo "Installed to /Applications/$(BUNDLE)"
 
 uninstall:
 	@pkill -f $(APP_NAME).app 2>/dev/null || true
-	@rm -rf ~/Applications/$(BUNDLE)
-	@echo "Uninstalled ~/Applications/$(BUNDLE)"
+	@rm -rf /Applications/$(BUNDLE)
+	@echo "Uninstalled /Applications/$(BUNDLE)"
 
 # Hooks
 install-hooks:
@@ -73,7 +74,5 @@ uninstall-all: uninstall-hooks uninstall-launchagent uninstall
 	@echo "Full uninstall complete!"
 
 # Dev: rebuild and restart
-restart: bundle
-	@pkill -f $(APP_NAME).app 2>/dev/null || true
-	@sleep 1
-	@open $(BUNDLE)
+restart: install
+	@open /Applications/$(BUNDLE)
