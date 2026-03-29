@@ -63,11 +63,24 @@ final class AlertManager: NSObject, ObservableObject, UNUserNotificationCenterDe
             Task.detached { Shell.run("afplay '\(path)'") }
         }
 
-        // Notification banner — no sound (we handle sound ourselves)
+        // Notification banner with context
         let content = UNMutableNotificationContent()
-        content.title = session.tmuxWindowName ?? session.projectName
-        content.body = "Waiting for your input"
-        // No content.sound — we play our own via afplay
+        content.title = "[\(session.tabIndex)] \(session.tmuxWindowName ?? session.projectName)"
+
+        // Body: Claude's question > last response summary > generic
+        if let question = session.claudeQuestion {
+            content.body = question
+        } else if let response = session.lastResponse {
+            // First meaningful line of Claude's response
+            let firstLine = response.components(separatedBy: "\n")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .first(where: { !$0.isEmpty }) ?? "Turn complete"
+            content.body = String(firstLine.prefix(150))
+        } else if let task = session.currentTask {
+            content.body = "Done: \(String(task.prefix(120)))"
+        } else {
+            content.body = "Waiting for your input"
+        }
 
         UNUserNotificationCenter.current().add(
             UNNotificationRequest(
