@@ -49,8 +49,14 @@ struct DashboardView: View {
             if let id = sessionManager.focusSessionRequest {
                 focusedSessionId = id
                 sessionManager.refreshSession(id)
+                sessionManager.watchSession(id)
                 sessionManager.focusSessionRequest = nil
                 isInputFocused = true
+            }
+        }
+        .onAppear {
+            if let session = focusedSession {
+                sessionManager.watchSession(session.id)
             }
         }
     }
@@ -66,6 +72,7 @@ struct DashboardView: View {
                     onTap: {
                         focusedSessionId = session.id
                         sessionManager.refreshSession(session.id)
+                        sessionManager.watchSession(session.id)
                     },
                     onRename: { name in
                         sessionManager.renameSession(session.id, to: name)

@@ -8,9 +8,11 @@ final class SessionManager: ObservableObject {
     @Published var eventLog: [String] = []
 
     let alertManager = AlertManager()
-    /// Set by DashboardView to handle notification taps → focus a session
     @Published var focusSessionRequest: String?
     private let server = HTTPServer(port: 7429)
+    private var fileWatcherSource: DispatchSourceFileSystemObject?
+    private var watchedFileDescriptor: Int32 = -1
+    private var watchedSessionId: String?
     private var discoveryTimer: Timer?
     private var saveTimer: Timer?
     private var pendingSave = false
@@ -392,6 +394,55 @@ final class SessionManager: ObservableObject {
             Shell.run("tmux rename-window -t \(window) '\(name)'")
         }
         scheduleSave()
+    }
+
+    // MARK: - File Watcher (instant content updates)
+
+    /// Watch the focused session's JSONL file for changes
+    func watchSession(_ sessionId: String) {
+        // Don't re-watch the same session
+        guard sessionId != watchedSessionId else { return }
+        stopWatching()
+
+        guard let idx = sessions.firstIndex(where: { $0.id == sessionId }),
+              let path = sessions[idx].transcriptPath, !path.isEmpty
+        else { return }
+
+        let fd = open(path, O_EVTONLY)
+        guard fd >= 0 else { return }
+
+        watchedFileDescriptor = fd
+        watchedSessionId = sessionId
+
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: fd,
+            eventMask: [.write, .extend],
+            queue: DispatchQueue.global(qos: .userInitiated)
+        )
+
+        source.setEventHandler { [weak self] in
+            Task { @MainActor in
+                guard let self = self,
+                      let idx = self.sessions.firstIndex(where: { $0.id == sessionId })
+                else { return }
+                self.loadSessionContext(for: &self.sessions[idx])
+                self.updateAttentionState()
+            }
+        }
+
+        source.setCancelHandler {
+            close(fd)
+        }
+
+        source.resume()
+        fileWatcherSource = source
+    }
+
+    private func stopWatching() {
+        fileWatcherSource?.cancel()
+        fileWatcherSource = nil
+        watchedSessionId = nil
+        watchedFileDescriptor = -1
     }
 
     // MARK: - Manual Refresh
