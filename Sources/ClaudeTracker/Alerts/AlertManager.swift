@@ -7,7 +7,12 @@ final class AlertManager: NSObject, ObservableObject, UNUserNotificationCenterDe
     private var cooldowns: [String: Date] = [:]
     private let cooldownInterval: TimeInterval = 60
 
-    var onNotificationTapped: ((String) -> Void)?
+    /// Called to focus a session in the tracker window
+    var onFocusSession: ((String) -> Void)?
+    /// Called to switch to a session's tmux window in terminal
+    var onSwitchToTerminal: ((SessionState) -> Void)?
+    /// Lookup session by ID
+    var getSession: ((String) -> SessionState?)?
 
     override init() {
         super.init()
@@ -21,7 +26,7 @@ final class AlertManager: NSObject, ObservableObject, UNUserNotificationCenterDe
         ) { _, _ in }
     }
 
-    // MARK: - Notification Delegate
+    // MARK: - Notification Click → focus based on setting
 
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
@@ -30,9 +35,9 @@ final class AlertManager: NSObject, ObservableObject, UNUserNotificationCenterDe
     ) {
         let sessionId = response.notification.request.identifier
             .replacingOccurrences(of: "claude-tracker-", with: "")
+
         Task { @MainActor in
-            NSApp.activate(ignoringOtherApps: true)
-            onNotificationTapped?(sessionId)
+            focusOnSession(sessionId: sessionId)
         }
         completionHandler()
     }
@@ -48,29 +53,28 @@ final class AlertManager: NSObject, ObservableObject, UNUserNotificationCenterDe
     // MARK: - Alert Dispatch
 
     func alertIfNeeded(session: SessionState, event: HookEvent) {
-        let settings = LaunchSettings.load()
-
-        // Only alert on Notification:idle_prompt — NOT on Stop (which fires between tool calls)
         guard event.hookEventName == "Notification" else { return }
 
-        // Check cooldown
         if let lastAlert = cooldowns[session.id],
            Date().timeIntervalSince(lastAlert) < cooldownInterval {
             return
         }
         cooldowns[session.id] = Date()
 
+        let settings = LaunchSettings.load()
+
         // 1. Sound
         if settings.soundEnabled {
-            playOnce(sound: settings.notificationSound)
+            let path = settings.notificationSound.path
+            Task.detached {
+                Shell.run("afplay '\(path)'")
+            }
         }
 
         // 2. Notification
         let content = UNMutableNotificationContent()
         content.title = session.tmuxWindowName ?? session.projectName
-        content.body = event.hookEventName == "Notification"
-            ? "Waiting for your input"
-            : "Turn complete"
+        content.body = "Waiting for your input"
         content.sound = .default
         let request = UNNotificationRequest(
             identifier: "claude-tracker-\(session.id)",
@@ -90,31 +94,34 @@ final class AlertManager: NSObject, ObservableObject, UNUserNotificationCenterDe
             }
         }
 
-        // 4. Focus
+        // 4. Auto-focus (when enabled, immediately brings focus without clicking notification)
         if settings.autoBringToFront {
-            switch settings.focusTarget {
-            case .tracker:
-                NSApp.activate(ignoringOtherApps: true)
-                onNotificationTapped?(session.id)
-            case .terminal:
-                let terminalApp = settings.terminalApp.rawValue
-                if let window = session.tmuxWindow {
-                    Task.detached {
-                        Shell.run("tmux select-window -t \(window)")
-                        Shell.run("open -a '\(terminalApp)'")
-                    }
-                }
-            case .none:
-                break
-            }
+            focusOnSession(sessionId: session.id)
         }
     }
 
-    // MARK: - Sound
+    // MARK: - Focus
 
-    private func playOnce(sound: LaunchSettings.NotificationSound) {
-        Task.detached {
-            Shell.run("afplay '\(sound.path)'")
+    /// Focus on a session — used by both notification click and auto-focus
+    private func focusOnSession(sessionId: String) {
+        let settings = LaunchSettings.load()
+
+        switch settings.focusTarget {
+        case .tracker:
+            NSApp.activate(ignoringOtherApps: true)
+            onFocusSession?(sessionId)
+        case .terminal:
+            if let session = getSession?(sessionId), let window = session.tmuxWindow {
+                let terminalApp = settings.terminalApp.rawValue
+                Task.detached {
+                    Shell.run("tmux select-window -t \(window)")
+                    Shell.run("open -a '\(terminalApp)'")
+                }
+            }
+        case .none:
+            // Still open tracker when clicking notification directly
+            NSApp.activate(ignoringOtherApps: true)
+            onFocusSession?(sessionId)
         }
     }
 
