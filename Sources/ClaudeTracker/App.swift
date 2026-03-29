@@ -29,8 +29,7 @@ struct ClaudeTrackerApp: App {
         Window("Settings", id: "settings") {
             SettingsView()
         }
-        .defaultSize(width: 400, height: 400)
-        .windowResizability(.contentMinSize)
+        .windowResizability(.contentSize)
     }
 }
 

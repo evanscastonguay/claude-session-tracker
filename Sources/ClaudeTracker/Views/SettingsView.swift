@@ -4,105 +4,75 @@ import AVFoundation
 struct SettingsView: View {
     @State private var settings = LaunchSettings.load()
     @State private var audioPlayer: AVAudioPlayer?
-    @State private var showAdvanced = false
-    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 16) {
+            section("New Session") {
+                row("Permissions") {
+                    Picker("", selection: $settings.permissionMode) {
+                        ForEach(LaunchSettings.PermissionMode.allCases) { Text($0.displayName).tag($0) }
+                    }.frame(width: 160)
+                }
+                row("Model") {
+                    Picker("", selection: $settings.model) {
+                        ForEach(LaunchSettings.ModelChoice.allCases) { Text($0.displayName).tag($0) }
+                    }.frame(width: 160)
+                }
+                row("Teams") {
+                    Picker("", selection: $settings.teams) {
+                        ForEach(LaunchSettings.TeamsMode.allCases) { Text($0.displayName).tag($0) }
+                    }.frame(width: 160)
+                }
+            }
 
-                    // New Session
-                    section("New Session") {
-                        row("Permissions") {
-                            Picker("", selection: $settings.permissionMode) {
-                                ForEach(LaunchSettings.PermissionMode.allCases) { Text($0.displayName).tag($0) }
-                            }.frame(width: 160)
+            section("When Session Completes") {
+                row("Sound") {
+                    HStack(spacing: 6) {
+                        Picker("", selection: $settings.notificationSound) {
+                            ForEach(LaunchSettings.NotificationSound.allCases) { Text($0.displayName).tag($0) }
+                        }.frame(width: 120)
+                        Button(action: { previewSound() }) {
+                            Image(systemName: "play.fill").font(.system(size: 9))
                         }
-                        row("Model") {
-                            Picker("", selection: $settings.model) {
-                                ForEach(LaunchSettings.ModelChoice.allCases) { Text($0.displayName).tag($0) }
-                            }.frame(width: 160)
-                        }
-                        row("Teams") {
-                            Picker("", selection: $settings.teams) {
-                                ForEach(LaunchSettings.TeamsMode.allCases) { Text($0.displayName).tag($0) }
-                            }.frame(width: 160)
-                        }
-                    }
-
-                    // When Session Completes
-                    section("When Session Completes") {
-                        row("Sound") {
-                            HStack(spacing: 6) {
-                                Picker("", selection: $settings.notificationSound) {
-                                    ForEach(LaunchSettings.NotificationSound.allCases) { Text($0.displayName).tag($0) }
-                                }.frame(width: 120)
-
-                                Button(action: { previewSound() }) {
-                                    Image(systemName: "play.fill")
-                                        .font(.system(size: 9))
-                                }
-                                .buttonStyle(.bordered)
-                                .controlSize(.small)
-
-                                Toggle("", isOn: $settings.soundEnabled)
-                                    .toggleStyle(.switch)
-                                    .controlSize(.small)
-                            }
-                        }
-
-                        row("Dock bounce") {
-                            Toggle("", isOn: $settings.dockBounce)
-                                .toggleStyle(.switch)
-                                .controlSize(.small)
-                        }
-                    }
-
-                    // Advanced (collapsible)
-                    DisclosureGroup(isExpanded: $showAdvanced) {
-                        VStack(spacing: 8) {
-                            row("Terminal") {
-                                Picker("", selection: $settings.terminalApp) {
-                                    ForEach(LaunchSettings.TerminalApp.allCases) { Text($0.displayName).tag($0) }
-                                }.frame(width: 160)
-                            }
-                            row("Summarize") {
-                                VStack(alignment: .trailing, spacing: 2) {
-                                    Toggle("", isOn: $settings.autoSummarize)
-                                        .toggleStyle(.switch)
-                                        .controlSize(.small)
-                                    Text("Uses Haiku per session")
-                                        .font(.system(size: 9))
-                                        .foregroundStyle(.tertiary)
-                                }
-                            }
-                            row("Poll interval") {
-                                Picker("", selection: $settings.discoveryInterval) {
-                                    Text("5s").tag(5)
-                                    Text("10s").tag(10)
-                                    Text("15s").tag(15)
-                                    Text("30s").tag(30)
-                                }
-                                .pickerStyle(.segmented)
-                                .frame(width: 160)
-                            }
-                        }
-                        .padding(12)
-                        .background(Color.primary.opacity(0.03))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                    } label: {
-                        Text("Advanced")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.tertiary)
-                            .textCase(.uppercase)
+                        .buttonStyle(.bordered).controlSize(.small)
+                        Toggle("", isOn: $settings.soundEnabled)
+                            .toggleStyle(.switch).controlSize(.small)
                     }
                 }
-                .padding()
+                row("Dock bounce") {
+                    Toggle("", isOn: $settings.dockBounce)
+                        .toggleStyle(.switch).controlSize(.small)
+                }
+            }
+
+            section("Advanced") {
+                row("Terminal") {
+                    Picker("", selection: $settings.terminalApp) {
+                        ForEach(LaunchSettings.TerminalApp.allCases) { Text($0.displayName).tag($0) }
+                    }.frame(width: 160)
+                }
+                row("Summarize") {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Toggle("", isOn: $settings.autoSummarize)
+                            .toggleStyle(.switch).controlSize(.small)
+                        Text("Uses Haiku per session")
+                            .font(.system(size: 9)).foregroundStyle(.tertiary)
+                    }
+                }
+                row("Poll interval") {
+                    Picker("", selection: $settings.discoveryInterval) {
+                        Text("5s").tag(5)
+                        Text("10s").tag(10)
+                        Text("15s").tag(15)
+                        Text("30s").tag(30)
+                    }
+                    .pickerStyle(.segmented).frame(width: 160)
+                }
             }
         }
-        .frame(width: 400, height: showAdvanced ? 520 : 380)
-        .animation(.easeInOut(duration: 0.2), value: showAdvanced)
+        .padding()
+        .frame(width: 400)
+        .fixedSize(horizontal: false, vertical: true)
         .onChange(of: settings.permissionMode) { save() }
         .onChange(of: settings.model) { save() }
         .onChange(of: settings.teams) { save() }
@@ -122,10 +92,8 @@ struct SettingsView: View {
         audioPlayer?.play()
     }
 
-    // MARK: - Reusable
-
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             Text(title)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.tertiary)
@@ -141,14 +109,10 @@ struct SettingsView: View {
 
     private func row<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
         HStack {
-            if !label.isEmpty {
-                Text(label)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 90, alignment: .trailing)
-            } else {
-                Spacer().frame(width: 90)
-            }
+            Text(label)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .frame(width: 90, alignment: .trailing)
             content()
             Spacer()
         }
