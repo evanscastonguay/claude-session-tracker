@@ -1,5 +1,6 @@
 import SwiftUI
 import AVFoundation
+import UserNotifications
 
 struct SettingsView: View {
     @State private var settings = LaunchSettings.load()
@@ -33,6 +34,25 @@ struct SettingsView: View {
 
                     // When Session Completes
                     section("When Session Completes") {
+                        HStack {
+                            Text("Notifications")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Grant Permission") {
+                                // Request permission + open System Settings
+                                UNUserNotificationCenter.current().requestAuthorization(
+                                    options: [.alert, .sound, .badge]
+                                ) { granted, _ in
+                                    if !granted {
+                                        DispatchQueue.main.async {
+                                            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings")!)
+                                        }
+                                    }
+                                }
+                            }
+                            .controlSize(.small)
+                        }
                         row("Sound") {
                             HStack(spacing: 6) {
                                 Picker("", selection: $settings.notificationSound) {
