@@ -3,12 +3,17 @@ import UserNotifications
 import AppKit
 
 @MainActor
-final class AlertManager: ObservableObject {
+final class AlertManager: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
     private var cooldowns: [String: Date] = [:]
     private let cooldownInterval: TimeInterval = 60
 
-    init() {
+    /// Called when user clicks a notification — opens tracker and focuses the session
+    var onNotificationTapped: ((String) -> Void)?
+
+    override init() {
+        super.init()
         requestNotificationPermission()
+        UNUserNotificationCenter.current().delegate = self
     }
 
     private func requestNotificationPermission() {
@@ -21,11 +26,38 @@ final class AlertManager: ObservableObject {
         }
     }
 
+    // MARK: - Notification Delegate (click handling)
+
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        let sessionId = response.notification.request.identifier
+            .replacingOccurrences(of: "claude-tracker-", with: "")
+
+        Task { @MainActor in
+            // Bring tracker to front and focus the session
+            NSApp.activate(ignoringOtherApps: true)
+            onNotificationTapped?(sessionId)
+        }
+
+        completionHandler()
+    }
+
+    // Show notifications even when app is in foreground
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound])
+    }
+
     // MARK: - Alert Dispatch
 
     func alertIfNeeded(session: SessionState, event: HookEvent) {
         let settings = LaunchSettings.load()
-        guard settings.soundEnabled else { return }
 
         // Check cooldown
         if let lastAlert = cooldowns[session.id],
@@ -33,51 +65,53 @@ final class AlertManager: ObservableObject {
             return
         }
 
-        switch event.hookEventName {
-        case "Notification":
-            sendAlert(
-                session: session,
-                title: "Needs Input",
-                body: session.lastUserPrompt.map { "Last: \($0)" } ?? "Waiting for your input",
-                sound: settings.notificationSound
-            )
+        let isCompletion = event.hookEventName == "Notification" || event.hookEventName == "Stop"
+        guard isCompletion else { return }
 
-        case "Stop":
-            sendAlert(
-                session: session,
-                title: "Turn Complete",
-                body: session.lastToolName.map { "Last tool: \($0)" } ?? "Ready for next prompt",
-                sound: settings.notificationSound
-            )
-
-        default:
-            break
-        }
-    }
-
-    // MARK: - Alert Sending
-
-    private func sendAlert(session: SessionState, title: String, body: String, sound: LaunchSettings.NotificationSound) {
         cooldowns[session.id] = Date()
+        let sessionName = session.tmuxWindowName ?? session.projectName
 
-        // Native notification
+        // 1. Sound
+        if settings.soundEnabled {
+            let sound = settings.notificationSound
+            Task.detached {
+                Shell.run("afplay \(sound.path)")
+            }
+        }
+
+        // 2. Native notification (always — clickable to open tracker)
         let content = UNMutableNotificationContent()
-        content.title = "Claude \u{2014} \(session.tmuxWindowName ?? session.projectName)"
-        content.subtitle = title
-        content.body = body
+        content.title = sessionName
+        content.body = event.hookEventName == "Notification"
+            ? "Waiting for your input"
+            : "Turn complete — ready for next prompt"
         content.sound = .default
+        content.categoryIdentifier = "SESSION_COMPLETE"
 
         let request = UNNotificationRequest(
             identifier: "claude-tracker-\(session.id)",
             content: content,
             trigger: nil
         )
-
         UNUserNotificationCenter.current().add(request)
 
-        // Play configured sound
-        Task.detached {
-            Shell.run("afplay \(sound.path)")
+        // 3. Dock bounce
+        if settings.dockBounce {
+            // Temporarily show in dock to enable bounce, then hide again
+            NSApp.setActivationPolicy(.regular)
+            NSApp.requestUserAttention(.criticalRequest)
+            // Hide dock icon again after 5s
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+                if !NSApp.isActive {
+                    NSApp.setActivationPolicy(.accessory)
+                }
+            }
+        }
+
+        // 4. Auto bring to front
+        if settings.autoBringToFront {
+            NSApp.activate(ignoringOtherApps: true)
+            onNotificationTapped?(session.id)
         }
     }
 

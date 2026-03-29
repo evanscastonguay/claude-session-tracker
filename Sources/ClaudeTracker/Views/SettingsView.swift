@@ -87,6 +87,14 @@ struct SettingsView: View {
 
                         Toggle("Auto-summarize (uses Haiku)", isOn: $settings.autoSummarize)
                             .font(.system(size: 12))
+
+                        Divider()
+
+                        Toggle("Dock bounce when session completes", isOn: $settings.dockBounce)
+                            .font(.system(size: 12))
+
+                        Toggle("Auto bring tracker to front", isOn: $settings.autoBringToFront)
+                            .font(.system(size: 12))
                     }
                 }
                 .padding()
@@ -102,6 +110,8 @@ struct SettingsView: View {
         .onChange(of: settings.notificationSound) { save() }
         .onChange(of: settings.autoSummarize) { save() }
         .onChange(of: settings.discoveryInterval) { save() }
+        .onChange(of: settings.dockBounce) { save() }
+        .onChange(of: settings.autoBringToFront) { save() }
     }
 
     // MARK: - Helpers

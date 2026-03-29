@@ -8,6 +8,8 @@ final class SessionManager: ObservableObject {
     @Published var eventLog: [String] = []
 
     let alertManager = AlertManager()
+    /// Set by DashboardView to handle notification taps → focus a session
+    @Published var focusSessionRequest: String?
     private let server = HTTPServer(port: 7429)
     private var discoveryTimer: Timer?
     private var saveTimer: Timer?
@@ -24,6 +26,11 @@ final class SessionManager: ObservableObject {
         loadState()
         startServer()
         startDiscovery()
+
+        // When user clicks a notification → focus that session in the dashboard
+        alertManager.onNotificationTapped = { [weak self] sessionId in
+            self?.focusSessionRequest = sessionId
+        }
     }
 
     // MARK: - Server

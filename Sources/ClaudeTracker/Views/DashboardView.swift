@@ -45,6 +45,13 @@ struct DashboardView: View {
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
+        .onChange(of: sessionManager.focusSessionRequest) {
+            if let id = sessionManager.focusSessionRequest {
+                focusedSessionId = id
+                sessionManager.refreshSession(id)
+                sessionManager.focusSessionRequest = nil
+            }
+        }
     }
 
     // MARK: - Tab Bar

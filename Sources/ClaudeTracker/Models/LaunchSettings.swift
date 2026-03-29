@@ -16,6 +16,8 @@ struct LaunchSettings: Codable {
     var notificationSound: NotificationSound = .glass
     var autoSummarize: Bool = true
     var discoveryInterval: Int = 10
+    var dockBounce: Bool = true
+    var autoBringToFront: Bool = false
 
     // MARK: - Enums
 
