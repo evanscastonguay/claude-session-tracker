@@ -50,8 +50,8 @@ final class AlertManager: NSObject, ObservableObject, UNUserNotificationCenterDe
     func alertIfNeeded(session: SessionState, event: HookEvent) {
         let settings = LaunchSettings.load()
 
-        let isCompletion = event.hookEventName == "Notification" || event.hookEventName == "Stop"
-        guard isCompletion else { return }
+        // Only alert on Notification:idle_prompt — NOT on Stop (which fires between tool calls)
+        guard event.hookEventName == "Notification" else { return }
 
         // Check cooldown
         if let lastAlert = cooldowns[session.id],

@@ -148,14 +148,14 @@ final class SessionManager: ObservableObject {
             }
 
         case "Stop":
+            // Stop fires after every response turn — NOT necessarily waiting for input.
+            // Silently refresh context but don't alert or set needsAttention.
             session.status = .idle
-            session.needsAttention = true
-            session.addTrajectory(type: "stop", summary: "Turn complete")
             loadSessionContext(for: &session)
-            // Async LLM summarization (runs in background, updates when done)
-            summarizeSession(sessionId: session.id)
 
         case "Notification":
+            // Notification:idle_prompt fires ONLY when Claude is truly waiting for user input.
+            // THIS is "your turn" — full alert flow.
             session.status = .waitingForInput
             session.needsAttention = true
             session.addTrajectory(type: "notification", summary: "Waiting for input")
@@ -239,11 +239,10 @@ final class SessionManager: ObservableObject {
                     sessions[idx].status = newStatus
                     sessions[idx].statusChangedAt = Date()
 
-                    // Transition to idle from working: mark attention + refresh context
+                    // Transition to idle from working: refresh context silently.
+                    // Don't set needsAttention — only Notification:idle_prompt does that.
                     if (newStatus == .idle || newStatus == .waitingForInput) && oldStatus == .working {
-                        sessions[idx].needsAttention = true
                         loadSessionContext(for: &sessions[idx])
-                        summarizeSession(sessionId: sessionId)
                     }
                 }
             } else {
@@ -344,8 +343,9 @@ final class SessionManager: ObservableObject {
 
     // MARK: - New Session
 
-    /// Launch a new Claude session in a new tmux window
-    func launchNewSession(directory: String, name: String?) {
+    /// Launch a new Claude session in a new tmux window. Returns the placeholder session ID.
+    @discardableResult
+    func launchNewSession(directory: String, name: String?) -> String {
         let settings = LaunchSettings.load()
         let (env, args) = settings.buildCommand()
 
@@ -396,6 +396,7 @@ final class SessionManager: ObservableObject {
         }
 
         log("Launched new session: \(windowName) in \(directory)")
+        return placeholderId
     }
 
     // MARK: - Rename

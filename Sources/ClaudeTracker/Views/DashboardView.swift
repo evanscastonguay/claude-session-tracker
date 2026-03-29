@@ -89,10 +89,11 @@ struct DashboardView: View {
                 allowsMultipleSelection: false
             ) { result in
                 if case .success(let urls) = result, let url = urls.first {
-                    sessionManager.launchNewSession(
+                    let newId = sessionManager.launchNewSession(
                         directory: url.path,
                         name: nil
                     )
+                    focusedSessionId = newId
                 }
             }
         }
