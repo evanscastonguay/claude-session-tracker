@@ -55,7 +55,6 @@ struct MenuBarContent: View {
             let icon = session.needsAttention ? "circle.fill" : (session.status == .working ? "progress.indicator" : "circle")
             Button(action: {
                 sessionManager.focusSessionRequest = session.id
-                sessionManager.alertManager.acknowledge(sessionId: session.id)
                 openWindow(id: "dashboard")
                 NSApp.activate(ignoringOtherApps: true)
             }) {

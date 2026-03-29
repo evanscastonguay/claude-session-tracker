@@ -6,7 +6,6 @@ import AppKit
 final class AlertManager: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
     private var cooldowns: [String: Date] = [:]
     private let cooldownInterval: TimeInterval = 60
-    @Published var isLooping = false
 
     var onNotificationTapped: ((String) -> Void)?
 
@@ -32,7 +31,6 @@ final class AlertManager: NSObject, ObservableObject, UNUserNotificationCenterDe
         let sessionId = response.notification.request.identifier
             .replacingOccurrences(of: "claude-tracker-", with: "")
         Task { @MainActor in
-            stopLoop()
             NSApp.activate(ignoringOtherApps: true)
             onNotificationTapped?(sessionId)
         }
@@ -64,11 +62,7 @@ final class AlertManager: NSObject, ObservableObject, UNUserNotificationCenterDe
 
         // 1. Sound
         if settings.soundEnabled {
-            if settings.loopSound {
-                startLoop(sound: settings.notificationSound)
-            } else {
-                playOnce(sound: settings.notificationSound)
-            }
+            playOnce(sound: settings.notificationSound)
         }
 
         // 2. Notification
@@ -116,7 +110,7 @@ final class AlertManager: NSObject, ObservableObject, UNUserNotificationCenterDe
         }
     }
 
-    // MARK: - Sound Loop
+    // MARK: - Sound
 
     private func playOnce(sound: LaunchSettings.NotificationSound) {
         Task.detached {
@@ -124,40 +118,7 @@ final class AlertManager: NSObject, ObservableObject, UNUserNotificationCenterDe
         }
     }
 
-    private func startLoop(sound: LaunchSettings.NotificationSound) {
-        isLooping = true
-        let path = sound.path
-        Task.detached { [weak self] in
-            while true {
-                // Check flag on main actor
-                let shouldContinue = await MainActor.run { self?.isLooping ?? false }
-                guard shouldContinue else { break }
-
-                // Play sound (blocks ~1s)
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: "/usr/bin/afplay")
-                process.arguments = [path]
-                try? process.run()
-                process.waitUntilExit()
-
-                // Wait between loops
-                try? await Task.sleep(for: .seconds(3))
-            }
-        }
-    }
-
-    /// Stop loop — kills any playing sound immediately
-    func stopLoop() {
-        guard isLooping else { return }
-        isLooping = false
-        // Kill any running afplay processes started by us
-        Task.detached {
-            Shell.run("pkill -f 'afplay.*Library/Sounds' 2>/dev/null")
-        }
-    }
-
-    func acknowledge(sessionId: String) {
-        stopLoop()
+    func clearCooldown(for sessionId: String) {
         cooldowns.removeValue(forKey: sessionId)
     }
 }

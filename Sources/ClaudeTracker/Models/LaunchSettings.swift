@@ -17,7 +17,6 @@ struct LaunchSettings: Codable {
     var discoveryInterval: Int = 10
     var dockBounce: Bool = true
     var autoBringToFront: Bool = false
-    var loopSound: Bool = false
     var focusTarget: FocusTarget = .tracker
 
     enum FocusTarget: String, Codable, CaseIterable, Identifiable {

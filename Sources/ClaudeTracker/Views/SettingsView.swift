@@ -52,13 +52,6 @@ struct SettingsView: View {
                             }
                         }
 
-                        if settings.soundEnabled {
-                            row("") {
-                                Toggle("Loop until acknowledged", isOn: $settings.loopSound)
-                                    .font(.system(size: 12))
-                            }
-                        }
-
                         row("Focus") {
                             Picker("", selection: $settings.focusTarget) {
                                 ForEach(LaunchSettings.FocusTarget.allCases) { Text($0.displayName).tag($0) }
@@ -125,7 +118,6 @@ struct SettingsView: View {
         .onChange(of: settings.discoveryInterval) { save() }
         .onChange(of: settings.dockBounce) { save() }
         .onChange(of: settings.autoBringToFront) { save() }
-        .onChange(of: settings.loopSound) { save() }
         .onChange(of: settings.focusTarget) { save() }
     }
 
