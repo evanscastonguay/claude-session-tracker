@@ -94,6 +94,7 @@ final class SessionManager: ObservableObject {
             session.status = .working
             session.needsAttention = false
             session.lastResponse = nil
+            session.lastSentAt = nil  // hook confirms Claude received input
             session.claudeAskedQuestion = false
             session.claudeQuestion = nil
             // Extract prompt from the dedicated "prompt" field (confirmed in payload)
@@ -151,12 +152,14 @@ final class SessionManager: ObservableObject {
             // Stop fires after every response turn — NOT necessarily waiting for input.
             // Silently refresh context but don't alert or set needsAttention.
             session.status = .idle
+            session.lastSentAt = nil  // clear grace period — hook is authoritative
             loadSessionContext(for: &session)
 
         case "Notification":
             // Notification:idle_prompt fires ONLY when Claude is truly waiting for user input.
             // THIS is "your turn" — full alert flow.
             session.status = .waitingForInput
+            session.lastSentAt = nil  // clear grace period — hook is authoritative
             session.needsAttention = true
             session.addTrajectory(type: "notification", summary: "Waiting for input")
             log("\(session.projectName) needs attention!")
