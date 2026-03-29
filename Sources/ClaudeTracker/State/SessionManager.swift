@@ -103,9 +103,6 @@ final class SessionManager: ObservableObject {
                !rawPrompt.hasPrefix("<system-reminder>"),
                !rawPrompt.hasPrefix("[Image: source:"),
                !rawPrompt.hasPrefix("Base directory for this skill:"),
-               !rawPrompt.hasPrefix("<teammate-message"),
-               !rawPrompt.hasPrefix("<task-completed"),
-               !rawPrompt.hasPrefix("{\"type\":"),
                rawPrompt.filter({ $0 == "<" }).count <= 3 {
                 // Clean image references from prompt text
                 let promptText = rawPrompt

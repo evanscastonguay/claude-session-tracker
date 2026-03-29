@@ -98,97 +98,117 @@ struct DashboardView: View {
 
     private func focusedPanel(_ session: SessionState) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 10) {
-                // Last exchange summary (what you asked + what happened)
-                VStack(alignment: .leading, spacing: 4) {
-                    if let prompt = session.lastUserPrompt {
-                        HStack(alignment: .top, spacing: 0) {
-                            Text("You: ")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(.secondary)
-                            Text(prompt)
-                                .font(.system(size: 12))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
-                                .textSelection(.enabled)
-                        }
-                    }
+            VStack(alignment: .leading, spacing: 8) {
+                // Header: name + status
+                HStack {
+                    Text(session.tmuxWindowName ?? session.projectName)
+                        .font(.system(size: 15, weight: .semibold))
+                    Spacer()
+                    statusLabel(session)
+                }
 
-                    if session.status == .working {
-                        HStack(spacing: 5) {
-                            ProgressView().controlSize(.mini)
-                            Text("Working \(session.timeSinceStatusChange)")
-                                .font(.system(size: 12))
-                                .foregroundStyle(.secondary)
-                        }
-                    } else {
-                        // Show response from last exchange (paired with user prompt, not random tool output)
-                        let responseText: String? = session.recentExchanges.last?.assistantResponse
-                            ?? session.lastResponse
-                        if let response = responseText {
-                            let summary = response.components(separatedBy: "\n")
-                                .map { $0.trimmingCharacters(in: .whitespaces) }
-                                .first(where: { !$0.isEmpty && $0.count > 10 }) ?? ""
-                            if !summary.isEmpty {
-                                HStack(alignment: .top, spacing: 0) {
-                                    Text("Claude: ")
-                                        .font(.system(size: 12, weight: .medium))
-                                        .foregroundStyle(.secondary)
-                                    Text(String(summary.prefix(200)))
-                                        .font(.system(size: 12))
-                                        .foregroundStyle(.primary.opacity(0.8))
-                                        .lineLimit(2)
-                                        .textSelection(.enabled)
-                                }
-                            }
-                        }
-                    }
+                // Problem statement
+                if let problem = session.problemStatement {
+                    Text(problem)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(2)
+                }
 
-                    // Question highlight
-                    if let question = session.claudeQuestion {
-                        HStack(spacing: 5) {
-                            Image(systemName: "questionmark.circle.fill")
-                                .font(.system(size: 12))
-                                .foregroundStyle(Color.accentColor)
-                            Text(question)
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(.primary)
-                                .lineLimit(2)
-                                .textSelection(.enabled)
-                        }
-                        .padding(8)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.accentColor.opacity(0.06))
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                Divider()
+
+                // Last exchange
+                if let prompt = session.lastUserPrompt {
+                    HStack(alignment: .top, spacing: 0) {
+                        Text("You: ")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                        Text(prompt)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .textSelection(.enabled)
                     }
                 }
 
+                if session.status == .working {
+                    HStack(spacing: 5) {
+                        ProgressView().controlSize(.mini)
+                        Text("Working \(session.timeSinceStatusChange)")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                    }
+                } else if let response = session.lastResponse {
+                    let lines = response.components(separatedBy: "\n")
+                        .map { $0.trimmingCharacters(in: .whitespaces) }
+                        .filter { !$0.isEmpty }
+                    let summary = lines.prefix(3).joined(separator: " ")
+                    if !summary.isEmpty {
+                        HStack(alignment: .top, spacing: 0) {
+                            Text("Claude: ")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.tertiary)
+                            Text(String(summary.prefix(300)))
+                                .font(.system(size: 12))
+                                .foregroundStyle(.primary.opacity(0.8))
+                                .lineLimit(3)
+                                .textSelection(.enabled)
+                        }
+                    }
+                }
+
+                // Question
+                if let question = session.claudeQuestion {
+                    HStack(spacing: 5) {
+                        Image(systemName: "questionmark.circle.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Color.accentColor)
+                        Text(question)
+                            .font(.system(size: 12, weight: .medium))
+                            .lineLimit(2)
+                            .textSelection(.enabled)
+                    }
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.accentColor.opacity(0.06))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+
                 // Action + metadata
-                HStack(spacing: 12) {
+                HStack {
                     if session.tmuxWindow != nil {
                         Button(action: { sessionManager.switchToSession(session) }) {
                             HStack(spacing: 4) {
                                 Image(systemName: "rectangle.portrait.and.arrow.right")
-                                    .font(.system(size: 11))
                                 Text("Open Terminal")
-                                    .font(.system(size: 11))
                             }
+                            .font(.system(size: 12))
+                            .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.bordered)
-                        .controlSize(.small)
+                        .controlSize(.regular)
                     }
+                }
 
-                    Spacer()
-
+                // Metadata
+                HStack(spacing: 8) {
+                    Text(session.projectName)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.quaternary)
                     if let branch = session.gitBranch, branch != "HEAD" {
                         Text(branch)
                             .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(.quaternary)
                     }
                     if let ctx = session.contextPercent {
-                        Text("\(ctx)%")
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(ctx > 80 ? Color.orange : Color.gray)
+                        Text("\(ctx)% context")
+                            .font(.system(size: 10))
+                            .foregroundStyle(ctx > 80 ? Color.orange : Color.gray.opacity(0.5))
+                    }
+                    if session.turnCount > 0 {
+                        Text("\(session.turnCount) turns")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.quaternary)
                     }
                 }
             }
@@ -196,9 +216,28 @@ struct DashboardView: View {
 
             Spacer(minLength: 0)
 
-            // Quick reply
             Divider()
             inputBar(session)
+        }
+    }
+
+    @ViewBuilder
+    private func statusLabel(_ session: SessionState) -> some View {
+        if session.status == .working {
+            HStack(spacing: 4) {
+                ProgressView().controlSize(.mini)
+                Text(session.timeSinceStatusChange)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+        } else if session.needsAttention {
+            Text(session.timeSinceStatusChange)
+                .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                .foregroundStyle(Color.accentColor)
+        } else {
+            Text("Idle \(session.timeSinceStatusChange)")
+                .font(.system(size: 12))
+                .foregroundStyle(.tertiary)
         }
     }
 

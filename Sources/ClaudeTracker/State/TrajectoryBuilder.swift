@@ -120,10 +120,6 @@ enum TrajectoryBuilder {
         // Filter image-only references
         if trimmed.hasPrefix("[Image: source:") { return false }
         if trimmed.hasPrefix("[Image:") && trimmed.hasSuffix("]") && trimmed.count < 200 { return false }
-        // Filter teammate/agent system messages
-        if trimmed.hasPrefix("<teammate-message") { return false }
-        if trimmed.hasPrefix("<task-completed") { return false }
-        if trimmed.hasPrefix("{\"type\":") { return false }
         // Filter XML-heavy content
         let angleBrackets = trimmed.filter { $0 == "<" }.count
         if angleBrackets > 3 && angleBrackets > trimmed.split(separator: " ").count / 2 { return false }
