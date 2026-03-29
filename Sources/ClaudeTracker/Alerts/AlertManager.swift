@@ -8,16 +8,15 @@ extension Notification.Name {
 
 @MainActor
 final class AlertManager: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
-    private var cooldowns: [String: Date] = [:]
-    private let cooldownInterval: TimeInterval = 60
 
     override init() {
         super.init()
+        // Still register as delegate for when UNNotifications DO work (clicking them)
         UNUserNotificationCenter.current().delegate = self
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
     }
 
-    // MARK: - User clicks notification → open tracker
+    // MARK: - Notification click handler
 
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
@@ -42,8 +41,7 @@ final class AlertManager: NSObject, ObservableObject, UNUserNotificationCenterDe
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        // Show banner but NO system sound — we play our own
-        completionHandler([.banner])
+        completionHandler([.banner, .list])
     }
 
     // MARK: - Alert
@@ -51,43 +49,44 @@ final class AlertManager: NSObject, ObservableObject, UNUserNotificationCenterDe
     func alertIfNeeded(session: SessionState, event: HookEvent) {
         guard event.hookEventName == "Notification" else { return }
 
-        if let lastAlert = cooldowns[session.id],
-           Date().timeIntervalSince(lastAlert) < cooldownInterval { return }
-        cooldowns[session.id] = Date()
-
         let settings = LaunchSettings.load()
+        let title = "[\(session.tabIndex)] \(session.tmuxWindowName ?? session.projectName)"
 
-        // Sound — ONLY our configured sound, no macOS default
+        // Build body
+        let body: String
+        if let question = session.claudeQuestion {
+            body = question
+        } else if let response = session.lastResponse {
+            let firstLine = response.components(separatedBy: "\n")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .first(where: { !$0.isEmpty }) ?? "Turn complete"
+            body = String(firstLine.prefix(150))
+        } else if let task = session.currentTask {
+            body = "Done: \(String(task.prefix(120)))"
+        } else {
+            body = "Waiting for your input"
+        }
+
+        // 1. Sound via afplay (always works)
         if settings.soundEnabled {
             let path = settings.notificationSound.path
             Task.detached { Shell.run("afplay '\(path)'") }
         }
 
-        // Notification banner with context
-        let content = UNMutableNotificationContent()
-        content.title = "[\(session.tabIndex)] \(session.tmuxWindowName ?? session.projectName)"
-
-        // Body: Claude's question > last response summary > generic
-        if let question = session.claudeQuestion {
-            content.body = question
-        } else if let response = session.lastResponse {
-            // First meaningful line of Claude's response
-            let firstLine = response.components(separatedBy: "\n")
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-                .first(where: { !$0.isEmpty }) ?? "Turn complete"
-            content.body = String(firstLine.prefix(150))
-        } else if let task = session.currentTask {
-            content.body = "Done: \(String(task.prefix(120)))"
-        } else {
-            content.body = "Waiting for your input"
+        // 2. Notification via osascript (always works, no permissions needed)
+        let escapedTitle = title.replacingOccurrences(of: "\"", with: "\\\"")
+        let escapedBody = body.replacingOccurrences(of: "\"", with: "\\\"")
+        Task.detached {
+            Shell.run("osascript -e 'display notification \"\(escapedBody)\" with title \"\(escapedTitle)\"'")
         }
 
+        // 3. Also try UNUserNotification (for clickable alerts if permission is granted)
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        let requestId = "claude-tracker-\(session.id)-\(Int(Date().timeIntervalSince1970))"
         UNUserNotificationCenter.current().add(
-            UNNotificationRequest(
-                identifier: "claude-tracker-\(session.id)",
-                content: content,
-                trigger: nil
-            )
+            UNNotificationRequest(identifier: requestId, content: content, trigger: nil)
         )
     }
 }
