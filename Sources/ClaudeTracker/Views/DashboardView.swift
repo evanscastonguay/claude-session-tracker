@@ -65,6 +65,7 @@ struct DashboardView: View {
                     onTap: {
                         focusedSessionId = session.id
                         sessionManager.refreshSession(session.id)
+                        sessionManager.alertManager.acknowledge(sessionId: session.id)
                     },
                     onRename: { name in
                         sessionManager.renameSession(session.id, to: name)
@@ -209,6 +210,7 @@ TextField("Reply\u{2026}", text: draft, axis: .vertical)
         }
 
         drafts[session.id] = ""
+        sessionManager.alertManager.acknowledge(sessionId: session.id)
         // Update state: set working, clear attention, store what we sent as lastUserPrompt
         // Set lastSentAt to prevent discovery from overriding working status for 30s
         if let idx = sessionManager.sessions.firstIndex(where: { $0.id == sessionId }) {

@@ -33,7 +33,6 @@ struct SettingsView: View {
                         pickerRow("Agent Teams", selection: $settings.teams) { teams in
                             Text(teams.displayName).tag(teams)
                         }
-                        textRow("Claude binary", value: $settings.claudeBinary)
                     }
 
                     // UI settings
@@ -90,11 +89,22 @@ struct SettingsView: View {
 
                         Divider()
 
+                        Toggle("Loop sound until acknowledged", isOn: $settings.loopSound)
+                            .font(.system(size: 12))
+
+                        Divider()
+
                         Toggle("Dock bounce when session completes", isOn: $settings.dockBounce)
                             .font(.system(size: 12))
 
-                        Toggle("Auto bring tracker to front", isOn: $settings.autoBringToFront)
+                        Toggle("Auto-focus when session completes", isOn: $settings.autoBringToFront)
                             .font(.system(size: 12))
+
+                        if settings.autoBringToFront {
+                            pickerRow("Focus target", selection: $settings.focusTarget) { target in
+                                Text(target.displayName).tag(target)
+                            }
+                        }
                     }
                 }
                 .padding()
@@ -105,13 +115,14 @@ struct SettingsView: View {
         .onChange(of: settings.model) { save() }
         .onChange(of: settings.teams) { save() }
         .onChange(of: settings.terminalApp) { save() }
-        .onChange(of: settings.claudeBinary) { save() }
         .onChange(of: settings.soundEnabled) { save() }
         .onChange(of: settings.notificationSound) { save() }
         .onChange(of: settings.autoSummarize) { save() }
         .onChange(of: settings.discoveryInterval) { save() }
         .onChange(of: settings.dockBounce) { save() }
         .onChange(of: settings.autoBringToFront) { save() }
+        .onChange(of: settings.loopSound) { save() }
+        .onChange(of: settings.focusTarget) { save() }
     }
 
     // MARK: - Helpers

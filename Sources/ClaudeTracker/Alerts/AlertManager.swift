@@ -6,8 +6,10 @@ import AppKit
 final class AlertManager: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
     private var cooldowns: [String: Date] = [:]
     private let cooldownInterval: TimeInterval = 60
+    private var soundLoopProcess: Process?
+    private var loopingForSession: String?
 
-    /// Called when user clicks a notification — opens tracker and focuses the session
+    /// Called when user clicks a notification
     var onNotificationTapped: ((String) -> Void)?
 
     override init() {
@@ -19,14 +21,10 @@ final class AlertManager: NSObject, ObservableObject, UNUserNotificationCenterDe
     private func requestNotificationPermission() {
         UNUserNotificationCenter.current().requestAuthorization(
             options: [.alert, .sound, .badge]
-        ) { granted, error in
-            if let error = error {
-                print("[AlertManager] Permission error: \(error)")
-            }
-        }
+        ) { _, _ in }
     }
 
-    // MARK: - Notification Delegate (click handling)
+    // MARK: - Notification Delegate
 
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
@@ -37,15 +35,13 @@ final class AlertManager: NSObject, ObservableObject, UNUserNotificationCenterDe
             .replacingOccurrences(of: "claude-tracker-", with: "")
 
         Task { @MainActor in
-            // Bring tracker to front and focus the session
+            stopSoundLoop()
             NSApp.activate(ignoringOtherApps: true)
             onNotificationTapped?(sessionId)
         }
-
         completionHandler()
     }
 
-    // Show notifications even when app is in foreground
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
@@ -69,24 +65,23 @@ final class AlertManager: NSObject, ObservableObject, UNUserNotificationCenterDe
         guard isCompletion else { return }
 
         cooldowns[session.id] = Date()
-        let sessionName = session.tmuxWindowName ?? session.projectName
 
-        // 1. Sound
+        // 1. Sound (loop or single)
         if settings.soundEnabled {
-            let sound = settings.notificationSound
-            Task.detached {
-                Shell.run("afplay \(sound.path)")
+            if settings.loopSound {
+                startSoundLoop(sound: settings.notificationSound, sessionId: session.id)
+            } else {
+                playOnce(sound: settings.notificationSound)
             }
         }
 
-        // 2. Native notification (always — clickable to open tracker)
+        // 2. Notification
         let content = UNMutableNotificationContent()
-        content.title = sessionName
+        content.title = session.tmuxWindowName ?? session.projectName
         content.body = event.hookEventName == "Notification"
             ? "Waiting for your input"
-            : "Turn complete — ready for next prompt"
+            : "Turn complete"
         content.sound = .default
-        content.categoryIdentifier = "SESSION_COMPLETE"
 
         let request = UNNotificationRequest(
             identifier: "claude-tracker-\(session.id)",
@@ -97,10 +92,8 @@ final class AlertManager: NSObject, ObservableObject, UNUserNotificationCenterDe
 
         // 3. Dock bounce
         if settings.dockBounce {
-            // Temporarily show in dock to enable bounce, then hide again
             NSApp.setActivationPolicy(.regular)
             NSApp.requestUserAttention(.criticalRequest)
-            // Hide dock icon again after 5s
             DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
                 if !NSApp.isActive {
                     NSApp.setActivationPolicy(.accessory)
@@ -108,10 +101,56 @@ final class AlertManager: NSObject, ObservableObject, UNUserNotificationCenterDe
             }
         }
 
-        // 4. Auto bring to front
+        // 4. Focus
         if settings.autoBringToFront {
-            NSApp.activate(ignoringOtherApps: true)
-            onNotificationTapped?(session.id)
+            switch settings.focusTarget {
+            case .tracker:
+                NSApp.activate(ignoringOtherApps: true)
+                onNotificationTapped?(session.id)
+            case .terminal:
+                let terminalApp = settings.terminalApp.rawValue
+                if let window = session.tmuxWindow {
+                    Task.detached {
+                        Shell.run("tmux select-window -t \(window)")
+                        Shell.run("open -a '\(terminalApp)'")
+                    }
+                }
+            case .none:
+                break
+            }
+        }
+    }
+
+    // MARK: - Sound
+
+    private func playOnce(sound: LaunchSettings.NotificationSound) {
+        Task.detached {
+            Shell.run("afplay \(sound.path)")
+        }
+    }
+
+    /// Loop the sound every 5 seconds until acknowledged
+    private func startSoundLoop(sound: LaunchSettings.NotificationSound, sessionId: String) {
+        stopSoundLoop()
+        loopingForSession = sessionId
+
+        Task.detached { [weak self] in
+            while await self?.loopingForSession == sessionId {
+                Shell.run("afplay \(sound.path)")
+                try? await Task.sleep(for: .seconds(4))
+            }
+        }
+    }
+
+    /// Stop the looping sound — called when user acknowledges
+    func stopSoundLoop() {
+        loopingForSession = nil
+    }
+
+    /// Acknowledge a session — stops sound loop and clears cooldown
+    func acknowledge(sessionId: String) {
+        if loopingForSession == sessionId {
+            stopSoundLoop()
         }
     }
 

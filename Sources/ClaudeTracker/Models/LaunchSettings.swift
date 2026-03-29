@@ -6,7 +6,6 @@ struct LaunchSettings: Codable {
     var permissionMode: PermissionMode = .bypass
     var model: ModelChoice = .default_
     var teams: TeamsMode = .off
-    var claudeBinary: String = "claude"
 
     // UI
     var terminalApp: TerminalApp = .ghostty
@@ -18,6 +17,22 @@ struct LaunchSettings: Codable {
     var discoveryInterval: Int = 10
     var dockBounce: Bool = true
     var autoBringToFront: Bool = false
+    var loopSound: Bool = false
+    var focusTarget: FocusTarget = .tracker
+
+    enum FocusTarget: String, Codable, CaseIterable, Identifiable {
+        case tracker = "tracker"
+        case terminal = "terminal"
+        case none = "none"
+        var id: String { rawValue }
+        var displayName: String {
+            switch self {
+            case .tracker: return "Claude Tracker"
+            case .terminal: return "Terminal (Ghostty)"
+            case .none: return "No auto-focus"
+            }
+        }
+    }
 
     // MARK: - Enums
 
@@ -119,7 +134,7 @@ struct LaunchSettings: Codable {
 
     func buildCommand() -> (env: [String: String], args: [String]) {
         var env: [String: String] = [:]
-        var args = [claudeBinary]
+        var args = ["claude"]
         args.append(contentsOf: permissionMode.cliArgs)
         args.append(contentsOf: model.cliArgs)
         env.merge(teams.envVars) { _, new in new }
