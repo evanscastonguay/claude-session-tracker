@@ -107,7 +107,8 @@ struct SettingsView: View {
                 .padding()
             }
         }
-        .frame(width: 400, height: 420)
+        .frame(width: 400, height: showAdvanced ? 520 : 380)
+        .animation(.easeInOut(duration: 0.2), value: showAdvanced)
         .onChange(of: settings.permissionMode) { save() }
         .onChange(of: settings.model) { save() }
         .onChange(of: settings.teams) { save() }
