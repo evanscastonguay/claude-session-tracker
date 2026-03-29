@@ -73,14 +73,7 @@ final class AlertManager: NSObject, ObservableObject, UNUserNotificationCenterDe
             Task.detached { Shell.run("afplay '\(path)'") }
         }
 
-        // 2. Notification via osascript (always works, no permissions needed)
-        let escapedTitle = title.replacingOccurrences(of: "\"", with: "\\\"")
-        let escapedBody = body.replacingOccurrences(of: "\"", with: "\\\"")
-        Task.detached {
-            Shell.run("osascript -e 'display notification \"\(escapedBody)\" with title \"\(escapedTitle)\"'")
-        }
-
-        // 3. Also try UNUserNotification (for clickable alerts if permission is granted)
+        // 2. Clickable notification via UNUserNotification
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
