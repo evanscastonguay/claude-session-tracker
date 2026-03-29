@@ -80,11 +80,11 @@ enum SessionDiscovery {
 
     /// Capture the last few lines of a tmux pane to detect status.
     ///
-    /// Claude Code TUI patterns observed:
-    ///   WORKING:  `✻ Puzzling… (3m 10s)` or `· Thinking… (5s)` — ellipsis + time in parens
-    ///             `Running…` — tool actively executing
-    ///   COMPLETED: `✻ Sautéed for 4m 38s` — past tense, "for" before duration
-    ///   IDLE:     `❯` prompt visible between `───` separator lines
+    /// Detection priority (highest first):
+    ///   1. ❯ prompt between ─── separators in LAST 5 lines → IDLE (always wins)
+    ///   2. Active spinner: `✻ Verb… (Xm Ys)` → WORKING
+    ///   3. Completed spinner: `✻ Verb for Xm` → IDLE
+    ///   4. Default → IDLE
     static func capturePaneStatus(window: String) -> PaneStatus {
         let (output, exitCode) = Shell.run("tmux capture-pane -t \(window).0 -p -S -12 2>/dev/null")
         guard exitCode == 0 else { return PaneStatus(contextPercent: nil, detectedStatus: .idle, spinnerDuration: nil) }
@@ -92,13 +92,29 @@ enum SessionDiscovery {
         var contextPercent: Int?
         var hasActiveSpinner = false
         var hasCompletedSpinner = false
-        var hasRunningTool = false
+        var hasPromptBetweenSeparators = false
         var spinnerDuration: String?
 
         let lines = output.components(separatedBy: "\n")
 
+        // FIRST: check the LAST 6 lines for ❯ between ─── separators
+        // This is the highest priority check — if the prompt is visible, Claude is IDLE
+        let bottomLines = Array(lines.suffix(8))
+        var sawSeparator = false
+        for line in bottomLines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.allSatisfy({ $0 == "\u{2500}" }) && trimmed.count > 5 {
+                sawSeparator = true
+            }
+            if sawSeparator && (trimmed == "\u{276F}" || trimmed.hasPrefix("\u{276F} ")) {
+                hasPromptBetweenSeparators = true
+                break
+            }
+        }
+
+        // Parse all lines for context %, spinner, etc.
         for line in lines {
-            // Extract context % from status line like "[Opus 4.6 (1M context)] 83%"
+            // Extract context %
             if line.contains("[") && line.contains("]") && line.contains("%") {
                 if let range = line.range(of: #"(\d+)%"#, options: .regularExpression) {
                     let numStr = line[range].dropLast()
@@ -108,34 +124,24 @@ enum SessionDiscovery {
                 }
             }
 
-            // ACTIVE spinner: has "…" (unicode ellipsis) + time in parens
-            // e.g., "✻ Puzzling… (3m 10s · ↓ 1.0k tokens)" or "✶ Honking… (5s)"
-            // Spinner chars vary: ✻ ✶ · etc.
-            if line.contains("\u{2026}") {  // unicode ellipsis
+            // Active spinner (only matters if prompt is NOT visible)
+            if !hasPromptBetweenSeparators && line.contains("\u{2026}") {
                 if line.range(of: #"\u{2026}.*\(\d+"#, options: .regularExpression) != nil {
                     hasActiveSpinner = true
-                    // Extract duration: first number group inside parens
-                    // "5m 12s · ↑ 481 tokens · thought for 2s" → "5m 12s"
                     if let parenStart = line.range(of: "("),
                        let parenEnd = line[parenStart.upperBound...].firstIndex(of: ")") {
                         let content = String(line[parenStart.upperBound..<parenEnd])
-                        // Split on " · " to get just the duration part
-                        let dur = content.components(separatedBy: " \u{00B7}").first  // " · "
+                        let dur = content.components(separatedBy: " \u{00B7}").first
                             ?? content.components(separatedBy: " ·").first
                             ?? content
                         let trimmed = dur.trimmingCharacters(in: .whitespacesAndNewlines)
                         if !trimmed.isEmpty { spinnerDuration = trimmed }
                     }
                 }
-                if line.contains("Running") {
-                    hasRunningTool = true
-                }
             }
 
-            // COMPLETED spinner: verb + "for" + duration at END of line (not inside parens)
-            // e.g., "✻ Sautéed for 4m 38s" but NOT "thought for 2s" inside parens
-            // Only match if line does NOT contain "…" (active spinners have ellipsis)
-            if !line.contains("\u{2026}") && !hasActiveSpinner {
+            // Completed spinner
+            if !hasPromptBetweenSeparators && !line.contains("\u{2026}") && !hasActiveSpinner {
                 if line.range(of: #" for \d+[smh]"#, options: .regularExpression) != nil {
                     hasCompletedSpinner = true
                     if let forRange = line.range(of: " for ") {
@@ -148,10 +154,12 @@ enum SessionDiscovery {
         }
 
         let status: SessionStatus
-        if hasActiveSpinner || hasRunningTool {
-            status = .working
-        } else if hasCompletedSpinner {
+        if hasPromptBetweenSeparators {
+            // ❯ prompt visible = IDLE, always. Overrides spinner text from background tasks.
             status = .idle
+            spinnerDuration = nil
+        } else if hasActiveSpinner {
+            status = .working
         } else {
             status = .idle
         }
