@@ -46,7 +46,7 @@ for event, matcher in events.items():
             "matcher": matcher,
             "hooks": [{
                 "type": "command",
-                "command": f"curl -s -X POST http://localhost:7429/events -H 'Content-Type: application/json' -d @- > /dev/null 2>&1 & # {tracker_tag}"
+                "command": f"curl -s -X POST http://localhost:7429/events -H 'Content-Type: application/json' -d @- > /dev/null 2>&1 # {tracker_tag}"
             }]
         })
         print(f"  Added {event} hook")
