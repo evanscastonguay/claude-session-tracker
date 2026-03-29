@@ -290,6 +290,26 @@ TextField("Reply\u{2026}", text: draft, axis: .vertical)
             }
         }
 
+        // Append current unpaired prompt if working (user just typed, Claude hasn't responded yet)
+        if session.status == .working,
+           let currentPrompt = session.lastUserPrompt,
+           exchanges.last?.userPrompt != currentPrompt {
+            var sep = AttributedString("\n\n\u{2500}\u{2500}\u{2500}\n\n")
+            sep.foregroundColor = NSColor.separatorColor
+            sep.font = .system(size: 9)
+            result.append(sep)
+
+            var youLabel = AttributedString("You: ")
+            youLabel.foregroundColor = NSColor.controlAccentColor.withAlphaComponent(0.7)
+            youLabel.font = .system(size: 12.5, weight: .semibold)
+            result.append(youLabel)
+
+            var promptText = AttributedString(currentPrompt)
+            promptText.foregroundColor = NSColor.secondaryLabelColor
+            promptText.font = .system(size: 12.5)
+            result.append(promptText)
+        }
+
         return result
     }
 
