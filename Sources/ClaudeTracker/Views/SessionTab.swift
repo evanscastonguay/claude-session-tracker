@@ -38,6 +38,7 @@ struct SessionTab: View {
                             .clipShape(RoundedRectangle(cornerRadius: 4))
                             .onSubmit { commitRename() }
                             .onExitCommand { cancelRename() }
+                            .onChange(of: isFocused) { if !isFocused { cancelRename() } }
                     } else {
                         Text(session.tmuxWindowName ?? session.projectName)
                             .font(.system(size: 11, weight: isFocused ? .medium : .regular))

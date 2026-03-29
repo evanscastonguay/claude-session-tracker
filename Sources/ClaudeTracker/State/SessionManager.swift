@@ -351,33 +351,48 @@ final class SessionManager: ObservableObject {
 
         let windowName = name ?? URL(fileURLWithPath: directory).lastPathComponent
 
-        Task.detached {
-            // Build tmux command with proper quoting
-            // The claude command needs to be a single string argument to tmux new-window
-            // JSON braces in --settings must survive shell expansion
+        // Optimistic UI: add placeholder tab immediately
+        let placeholderId = "pending-\(UUID().uuidString)"
+        var placeholder = SessionState(sessionId: placeholderId, cwd: directory)
+        placeholder.tmuxWindowName = windowName
+        placeholder.status = .working
+        placeholder.problemStatement = "Starting new session\u{2026}"
+        // Find next available window index for display
+        let maxIndex = sessions.compactMap({ $0.tmuxWindow }).compactMap({
+            Int($0.split(separator: ":").last ?? "")
+        }).max() ?? -1
+        placeholder.tmuxWindow = "0:\(maxIndex + 1)"
+        sessions.append(placeholder)
+
+        Task.detached { [weak self] in
             var tmuxArgs = ["tmux", "new-window", "-n", windowName]
             for (k, v) in env {
                 tmuxArgs.append(contentsOf: ["-e", "\(k)=\(v)"])
             }
             tmuxArgs.append(contentsOf: ["-c", directory])
 
-            // Build the claude command as a single shell string
-            // Escape single quotes in the JSON settings arg
             let claudeCmd = args.map { arg in
                 if arg.contains("{") || arg.contains("}") {
-                    return "'\(arg)'"  // wrap JSON in single quotes
+                    return "'\(arg)'"
                 }
                 return arg
             }.joined(separator: " ")
 
             tmuxArgs.append(claudeCmd)
 
-            // Use Process directly for proper argument passing
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
             process.arguments = tmuxArgs
             try? process.run()
             process.waitUntilExit()
+
+            // Force discovery to pick up the real session quickly
+            try? await Task.sleep(for: .seconds(3))
+            await MainActor.run {
+                // Remove placeholder — discovery will add the real one
+                self?.sessions.removeAll { $0.id == placeholderId }
+                Task { await self?.runDiscovery() }
+            }
         }
 
         log("Launched new session: \(windowName) in \(directory)")
