@@ -21,6 +21,17 @@
     <string>0.1.0</string>
     <key>NSUserNotificationAlertStyle</key>
     <string>alert</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>claudetracker</string>
+            </array>
+            <key>CFBundleURLName</key>
+            <string>com.evanscastonguay.claude-tracker</string>
+        </dict>
+    </array>
     <key>NSAppTransportSecurity</key>
     <dict>
         <key>NSAllowsLocalNetworking</key>
