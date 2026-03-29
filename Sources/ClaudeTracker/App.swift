@@ -1,9 +1,17 @@
 import SwiftUI
 
+/// Shared state for cross-component communication
+class AppCoordinator: ObservableObject {
+    static let shared = AppCoordinator()
+    @Published var pendingSessionFocus: String?
+}
+
 @main
 struct ClaudeTrackerApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var sessionManager = SessionManager()
+    @StateObject private var coordinator = AppCoordinator.shared
+    @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
         MenuBarExtra {
@@ -19,7 +27,21 @@ struct ClaudeTrackerApp: App {
             DashboardView(sessionManager: sessionManager)
                 .frame(minWidth: 500, minHeight: 350)
                 .onAppear {
+                    // When window appears, check if there's a pending focus request
+                    if let sessionId = coordinator.pendingSessionFocus {
+                        sessionManager.focusSessionRequest = sessionId
+                        sessionManager.refreshSession(sessionId)
+                        coordinator.pendingSessionFocus = nil
+                    }
                     NSApp.activate(ignoringOtherApps: true)
+                }
+                .onChange(of: coordinator.pendingSessionFocus) {
+                    // Handle focus requests that arrive while window is already open
+                    if let sessionId = coordinator.pendingSessionFocus {
+                        sessionManager.focusSessionRequest = sessionId
+                        sessionManager.refreshSession(sessionId)
+                        coordinator.pendingSessionFocus = nil
+                    }
                 }
         }
         .defaultSize(width: 680, height: 520)
@@ -39,8 +61,7 @@ struct MenuBarContent: View {
 
     var body: some View {
         Button("Open Dashboard") {
-            openWindow(id: "dashboard")
-            NSApp.activate(ignoringOtherApps: true)
+            openDashboard()
         }
         .keyboardShortcut("b", modifiers: [.command, .shift])
 
@@ -53,9 +74,8 @@ struct MenuBarContent: View {
         ForEach(sessions) { session in
             let icon = session.needsAttention ? "circle.fill" : (session.status == .working ? "progress.indicator" : "circle")
             Button(action: {
-                sessionManager.focusSessionRequest = session.id
-                openWindow(id: "dashboard")
-                NSApp.activate(ignoringOtherApps: true)
+                AppCoordinator.shared.pendingSessionFocus = session.id
+                openDashboard()
             }) {
                 Label("[\(session.tabIndex)] \(session.tmuxWindowName ?? session.projectName) \u{2014} \(session.statusSummary)", systemImage: icon)
             }
@@ -74,49 +94,64 @@ struct MenuBarContent: View {
         }
         .keyboardShortcut("q", modifiers: .command)
     }
+
+    private func openDashboard() {
+        openWindow(id: "dashboard")
+        NSApp.activate(ignoringOtherApps: true)
+    }
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
-        // Listen for notification clicks — open the dashboard window
+        // Listen for notification clicks
         NotificationCenter.default.addObserver(
             self,
-            selector: #selector(handleOpenSession),
+            selector: #selector(handleNotificationClick),
             name: .openSessionFromNotification,
             object: nil
         )
     }
 
-    @objc func handleOpenSession(_ notification: Notification) {
-        // Bring app to front
+    @objc func handleNotificationClick(_ notification: Notification) {
+        let sessionId = notification.userInfo?["sessionId"] as? String
+
+        // 1. Set the pending focus (will be picked up by window onAppear or onChange)
+        if let sessionId = sessionId {
+            AppCoordinator.shared.pendingSessionFocus = sessionId
+        }
+
+        // 2. Show dock icon so we can activate
         NSApp.setActivationPolicy(.regular)
+
+        // 3. Activate the app
         NSApp.activate(ignoringOtherApps: true)
 
-        // Find or create the dashboard window
-        if let window = NSApp.windows.first(where: {
-            $0.title == "Claude Tracker" || $0.identifier?.rawValue.contains("dashboard") == true
-        }) {
-            window.makeKeyAndOrderFront(nil)
-        }
+        // 4. Find existing dashboard window or it will be created by SwiftUI
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            // Try to find the window
+            let dashboardWindow = NSApp.windows.first(where: {
+                $0.title.contains("Claude Tracker") ||
+                $0.identifier?.rawValue.contains("dashboard") == true
+            })
 
-        // Set focus request on session manager (picked up by DashboardView onChange)
-        if let sessionId = notification.userInfo?["sessionId"] as? String {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                NotificationCenter.default.post(
-                    name: Notification.Name("focusSession"),
-                    object: nil,
-                    userInfo: ["sessionId": sessionId]
-                )
+            if let window = dashboardWindow {
+                window.makeKeyAndOrderFront(nil)
+                window.orderFrontRegardless()
             }
-        }
 
-        // Hide dock icon again after window is shown
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-            NSApp.setActivationPolicy(.accessory)
-            // Re-activate after policy change to keep window focused
+            // 5. Re-activate to ensure focus
             NSApp.activate(ignoringOtherApps: true)
+
+            // 6. Hide dock icon after a delay
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                NSApp.setActivationPolicy(.accessory)
+                // Re-activate after policy change to keep window focused
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    NSApp.activate(ignoringOtherApps: true)
+                }
+            }
         }
     }
 }

@@ -50,12 +50,7 @@ struct DashboardView: View {
                 focusedSessionId = id
                 sessionManager.refreshSession(id)
                 sessionManager.focusSessionRequest = nil
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("focusSession"))) { notif in
-            if let sessionId = notif.userInfo?["sessionId"] as? String {
-                focusedSessionId = sessionId
-                sessionManager.refreshSession(sessionId)
+                isInputFocused = true
             }
         }
     }
