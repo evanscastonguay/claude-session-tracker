@@ -99,15 +99,6 @@ struct DashboardView: View {
     private func focusedPanel(_ session: SessionState) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 10) {
-                // Problem statement (dim, big picture)
-                if let problem = session.problemStatement {
-                    Text(problem)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(2)
-                        .textSelection(.enabled)
-                }
-
                 // Last exchange summary (what you asked + what happened)
                 VStack(alignment: .leading, spacing: 4) {
                     if let prompt = session.lastUserPrompt {
@@ -130,21 +121,25 @@ struct DashboardView: View {
                                 .font(.system(size: 12))
                                 .foregroundStyle(.secondary)
                         }
-                    } else if let response = session.lastResponse {
-                        // First meaningful line of response
-                        let summary = response.components(separatedBy: "\n")
-                            .map { $0.trimmingCharacters(in: .whitespaces) }
-                            .first(where: { !$0.isEmpty }) ?? ""
-                        if !summary.isEmpty {
-                            HStack(alignment: .top, spacing: 0) {
-                                Text("Claude: ")
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundStyle(.secondary)
-                                Text(String(summary.prefix(200)))
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(.primary.opacity(0.8))
-                                    .lineLimit(2)
-                                    .textSelection(.enabled)
+                    } else {
+                        // Show response from last exchange (paired with user prompt, not random tool output)
+                        let responseText: String? = session.recentExchanges.last?.assistantResponse
+                            ?? session.lastResponse
+                        if let response = responseText {
+                            let summary = response.components(separatedBy: "\n")
+                                .map { $0.trimmingCharacters(in: .whitespaces) }
+                                .first(where: { !$0.isEmpty && $0.count > 10 }) ?? ""
+                            if !summary.isEmpty {
+                                HStack(alignment: .top, spacing: 0) {
+                                    Text("Claude: ")
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundStyle(.secondary)
+                                    Text(String(summary.prefix(200)))
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(.primary.opacity(0.8))
+                                        .lineLimit(2)
+                                        .textSelection(.enabled)
+                                }
                             }
                         }
                     }
@@ -168,25 +163,8 @@ struct DashboardView: View {
                     }
                 }
 
-                // Metadata + action
-                HStack {
-                    // Branch + context %
-                    HStack(spacing: 6) {
-                        if let branch = session.gitBranch, branch != "HEAD" {
-                            Text(branch)
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(.tertiary)
-                        }
-                        if let ctx = session.contextPercent {
-                            Text("\(ctx)%")
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(ctx > 80 ? Color.orange : Color.gray)
-                        }
-                    }
-
-                    Spacer()
-
-                    // Open in terminal
+                // Action + metadata
+                HStack(spacing: 12) {
                     if session.tmuxWindow != nil {
                         Button(action: { sessionManager.switchToSession(session) }) {
                             HStack(spacing: 4) {
@@ -198,6 +176,19 @@ struct DashboardView: View {
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
+                    }
+
+                    Spacer()
+
+                    if let branch = session.gitBranch, branch != "HEAD" {
+                        Text(branch)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                    }
+                    if let ctx = session.contextPercent {
+                        Text("\(ctx)%")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(ctx > 80 ? Color.orange : Color.gray)
                     }
                 }
             }
