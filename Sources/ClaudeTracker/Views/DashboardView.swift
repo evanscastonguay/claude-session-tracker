@@ -84,8 +84,7 @@ struct DashboardView: View {
             ) { result in
                 if case .success(let urls) = result, let url = urls.first {
                     let newId = sessionManager.launchNewSession(
-                        directory: url.path,
-                        name: nil
+                        directory: url.path, name: nil
                     )
                     focusedSessionId = newId
                 }
@@ -95,17 +94,35 @@ struct DashboardView: View {
         .padding(.vertical, 4)
     }
 
-    // MARK: - Focused Panel (status + context + actions)
+    // MARK: - Focused Panel
 
     private func focusedPanel(_ session: SessionState) -> some View {
-        VStack(spacing: 0) {
-            // Context area
-            VStack(alignment: .leading, spacing: 12) {
-                // Session name + wait time
-                HStack {
-                    Text(session.tmuxWindowName ?? session.projectName)
-                        .font(.system(size: 16, weight: .semibold))
-                    Spacer()
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 10) {
+                // Problem statement (dim, big picture)
+                if let problem = session.problemStatement {
+                    Text(problem)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(2)
+                        .textSelection(.enabled)
+                }
+
+                // Last exchange summary (what you asked + what happened)
+                VStack(alignment: .leading, spacing: 4) {
+                    if let prompt = session.lastUserPrompt {
+                        HStack(alignment: .top, spacing: 0) {
+                            Text("You: ")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.secondary)
+                            Text(prompt)
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                                .textSelection(.enabled)
+                        }
+                    }
+
                     if session.status == .working {
                         HStack(spacing: 5) {
                             ProgressView().controlSize(.mini)
@@ -113,45 +130,82 @@ struct DashboardView: View {
                                 .font(.system(size: 12))
                                 .foregroundStyle(.secondary)
                         }
-                    } else if session.needsAttention {
-                        Text(session.timeSinceStatusChange)
-                            .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(Color.accentColor)
-                    } else {
-                        Text("Idle \(session.timeSinceStatusChange)")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-
-                // Problem statement — what this session is about
-                if let problem = session.problemStatement {
-                    Text(problem)
-                        .font(.system(size: 13))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(3)
-                        .textSelection(.enabled)
-                }
-
-                // Open in terminal button
-                if session.tmuxWindow != nil {
-                    Button(action: { sessionManager.switchToSession(session) }) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "rectangle.portrait.and.arrow.right")
-                            Text("Open in Terminal")
+                    } else if let response = session.lastResponse {
+                        // First meaningful line of response
+                        let summary = response.components(separatedBy: "\n")
+                            .map { $0.trimmingCharacters(in: .whitespaces) }
+                            .first(where: { !$0.isEmpty }) ?? ""
+                        if !summary.isEmpty {
+                            HStack(alignment: .top, spacing: 0) {
+                                Text("Claude: ")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                                Text(String(summary.prefix(200)))
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(.primary.opacity(0.8))
+                                    .lineLimit(2)
+                                    .textSelection(.enabled)
+                            }
                         }
-                        .font(.system(size: 13))
-                        .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.regular)
+
+                    // Question highlight
+                    if let question = session.claudeQuestion {
+                        HStack(spacing: 5) {
+                            Image(systemName: "questionmark.circle.fill")
+                                .font(.system(size: 12))
+                                .foregroundStyle(Color.accentColor)
+                            Text(question)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.primary)
+                                .lineLimit(2)
+                                .textSelection(.enabled)
+                        }
+                        .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.accentColor.opacity(0.06))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }
+                }
+
+                // Metadata + action
+                HStack {
+                    // Branch + context %
+                    HStack(spacing: 6) {
+                        if let branch = session.gitBranch, branch != "HEAD" {
+                            Text(branch)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.tertiary)
+                        }
+                        if let ctx = session.contextPercent {
+                            Text("\(ctx)%")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(ctx > 80 ? Color.orange : Color.gray)
+                        }
+                    }
+
+                    Spacer()
+
+                    // Open in terminal
+                    if session.tmuxWindow != nil {
+                        Button(action: { sessionManager.switchToSession(session) }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "rectangle.portrait.and.arrow.right")
+                                    .font(.system(size: 11))
+                                Text("Open Terminal")
+                                    .font(.system(size: 11))
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
                 }
             }
-            .padding(16)
+            .padding(14)
 
-            Spacer()
+            Spacer(minLength: 0)
 
-            // Quick reply bar
+            // Quick reply
             Divider()
             inputBar(session)
         }
@@ -212,6 +266,7 @@ struct DashboardView: View {
         if let idx = sessionManager.sessions.firstIndex(where: { $0.id == session.id }) {
             sessionManager.sessions[idx].needsAttention = false
             sessionManager.sessions[idx].status = .working
+            sessionManager.sessions[idx].lastUserPrompt = text
             sessionManager.sessions[idx].statusChangedAt = Date()
             sessionManager.sessions[idx].lastSentAt = Date()
         }
