@@ -39,10 +39,6 @@ struct SettingsView: View {
                             .toggleStyle(.switch).controlSize(.small)
                     }
                 }
-                row("Dock bounce") {
-                    Toggle("", isOn: $settings.dockBounce)
-                        .toggleStyle(.switch).controlSize(.small)
-                }
             }
 
             section("Advanced") {
@@ -81,7 +77,6 @@ struct SettingsView: View {
         .onChange(of: settings.notificationSound) { save() }
         .onChange(of: settings.autoSummarize) { save() }
         .onChange(of: settings.discoveryInterval) { save() }
-        .onChange(of: settings.dockBounce) { save() }
     }
 
     private func save() { settings.save() }

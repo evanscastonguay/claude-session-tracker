@@ -89,16 +89,5 @@ final class AlertManager: NSObject, ObservableObject, UNUserNotificationCenterDe
                 trigger: nil
             )
         )
-
-        // Dock bounce
-        if settings.dockBounce {
-            NSApp.setActivationPolicy(.regular)
-            NSApp.requestUserAttention(.criticalRequest)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
-                if !NSApp.isActive {
-                    NSApp.setActivationPolicy(.accessory)
-                }
-            }
-        }
     }
 }
