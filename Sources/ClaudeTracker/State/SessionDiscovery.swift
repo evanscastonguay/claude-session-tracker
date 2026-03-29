@@ -20,8 +20,6 @@ enum SessionDiscovery {
 
     struct PaneStatus {
         let contextPercent: Int?
-        let detectedStatus: SessionStatus
-        let spinnerDuration: String?  // e.g. "2m 10s" from active spinner, or "3m 27s" from completed
     }
 
     /// Scan ~/.claude/sessions/*.json for active sessions
@@ -78,43 +76,13 @@ enum SessionDiscovery {
         return false
     }
 
-    /// Capture the last few lines of a tmux pane to detect status.
-    ///
-    /// Detection priority (highest first):
-    ///   1. ❯ prompt between ─── separators in LAST 5 lines → IDLE (always wins)
-    ///   2. Active spinner: `✻ Verb… (Xm Ys)` → WORKING
-    ///   3. Completed spinner: `✻ Verb for Xm` → IDLE
-    ///   4. Default → IDLE
+    /// Capture pane to extract ONLY context %. Status comes from hooks, not pane parsing.
     static func capturePaneStatus(window: String) -> PaneStatus {
-        let (output, exitCode) = Shell.run("tmux capture-pane -t \(window).0 -p -S -12 2>/dev/null")
-        guard exitCode == 0 else { return PaneStatus(contextPercent: nil, detectedStatus: .idle, spinnerDuration: nil) }
+        let (output, exitCode) = Shell.run("tmux capture-pane -t \(window).0 -p -S -5 2>/dev/null")
+        guard exitCode == 0 else { return PaneStatus(contextPercent: nil) }
 
         var contextPercent: Int?
-        var hasActiveSpinner = false
-        var hasCompletedSpinner = false
-        var hasPromptBetweenSeparators = false
-        var spinnerDuration: String?
-
-        let lines = output.components(separatedBy: "\n")
-
-        // FIRST: check the LAST 6 lines for ❯ between ─── separators
-        // This is the highest priority check — if the prompt is visible, Claude is IDLE
-        let bottomLines = Array(lines.suffix(8))
-        var sawSeparator = false
-        for line in bottomLines {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.allSatisfy({ $0 == "\u{2500}" }) && trimmed.count > 5 {
-                sawSeparator = true
-            }
-            if sawSeparator && (trimmed == "\u{276F}" || trimmed.hasPrefix("\u{276F} ")) {
-                hasPromptBetweenSeparators = true
-                break
-            }
-        }
-
-        // Parse all lines for context %, spinner, etc.
-        for line in lines {
-            // Extract context %
+        for line in output.components(separatedBy: "\n") {
             if line.contains("[") && line.contains("]") && line.contains("%") {
                 if let range = line.range(of: #"(\d+)%"#, options: .regularExpression) {
                     let numStr = line[range].dropLast()
@@ -123,48 +91,8 @@ enum SessionDiscovery {
                     }
                 }
             }
-
-            // Active spinner (only matters if prompt is NOT visible)
-            if !hasPromptBetweenSeparators && line.contains("\u{2026}") {
-                if line.range(of: #"\u{2026}.*\(\d+"#, options: .regularExpression) != nil {
-                    hasActiveSpinner = true
-                    if let parenStart = line.range(of: "("),
-                       let parenEnd = line[parenStart.upperBound...].firstIndex(of: ")") {
-                        let content = String(line[parenStart.upperBound..<parenEnd])
-                        let dur = content.components(separatedBy: " \u{00B7}").first
-                            ?? content.components(separatedBy: " ·").first
-                            ?? content
-                        let trimmed = dur.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if !trimmed.isEmpty { spinnerDuration = trimmed }
-                    }
-                }
-            }
-
-            // Completed spinner
-            if !hasPromptBetweenSeparators && !line.contains("\u{2026}") && !hasActiveSpinner {
-                if line.range(of: #" for \d+[smh]"#, options: .regularExpression) != nil {
-                    hasCompletedSpinner = true
-                    if let forRange = line.range(of: " for ") {
-                        let afterFor = String(line[forRange.upperBound...])
-                            .trimmingCharacters(in: .whitespacesAndNewlines)
-                        if !afterFor.isEmpty { spinnerDuration = afterFor }
-                    }
-                }
-            }
         }
-
-        let status: SessionStatus
-        if hasPromptBetweenSeparators {
-            // ❯ prompt visible = IDLE, always. Overrides spinner text from background tasks.
-            status = .idle
-            spinnerDuration = nil
-        } else if hasActiveSpinner {
-            status = .working
-        } else {
-            status = .idle
-        }
-
-        return PaneStatus(contextPercent: contextPercent, detectedStatus: status, spinnerDuration: spinnerDuration)
+        return PaneStatus(contextPercent: contextPercent)
     }
 
     struct DiscoveryResult {
@@ -172,11 +100,9 @@ enum SessionDiscovery {
         let tmuxWindow: String?
         let tmuxWindowName: String?
         let contextPercent: Int?
-        let detectedStatus: SessionStatus
-        let spinnerDuration: String?
     }
 
-    /// Full discovery: sessions + tmux correlation + status detection
+    /// Full discovery: sessions + tmux correlation. Status comes from hooks, not pane.
     static func fullDiscovery() -> [DiscoveryResult] {
         let sessions = discoverSessions()
         let panes = getTmuxPanes()
@@ -185,11 +111,7 @@ enum SessionDiscovery {
             var tmuxWindow: String?
             var tmuxWindowName: String?
             var contextPercent: Int?
-            var detectedStatus: SessionStatus = .idle
-            var spinnerDuration: String?
 
-            // Match Claude PID to tmux pane: check both direct match (tmux launched claude)
-            // and parent match (shell launched claude inside tmux pane)
             let matchedPane = panes.first(where: { $0.panePid == session.pid })
                 ?? getParentPid(session.pid).flatMap { parentPid in
                     panes.first(where: { $0.panePid == parentPid })
@@ -197,25 +119,14 @@ enum SessionDiscovery {
             if let pane = matchedPane {
                 tmuxWindow = pane.sessionWindow
                 tmuxWindowName = pane.windowName
-
-                let paneStatus = capturePaneStatus(window: pane.sessionWindow)
-                contextPercent = paneStatus.contextPercent
-                detectedStatus = paneStatus.detectedStatus
-                spinnerDuration = paneStatus.spinnerDuration
-            }
-
-            // Cross-check with child processes
-            if detectedStatus == .idle && hasActiveChildren(session.pid) {
-                detectedStatus = .working
+                contextPercent = capturePaneStatus(window: pane.sessionWindow).contextPercent
             }
 
             return DiscoveryResult(
                 session: session,
                 tmuxWindow: tmuxWindow,
                 tmuxWindowName: tmuxWindowName,
-                contextPercent: contextPercent,
-                detectedStatus: detectedStatus,
-                spinnerDuration: spinnerDuration
+                contextPercent: contextPercent
             )
         }
     }

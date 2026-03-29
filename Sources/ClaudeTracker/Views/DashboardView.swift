@@ -124,11 +124,9 @@ struct DashboardView: View {
                         Text("Claude is working\u{2026}")
                             .font(.system(size: 13))
                             .foregroundStyle(.secondary)
-                        if let dur = session.spinnerDuration {
-                            Text(dur)
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(.tertiary)
-                        }
+                        Text(session.timeSinceStatusChange)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.tertiary)
                         Spacer()
                     }
                     .frame(maxWidth: .infinity)

@@ -181,7 +181,6 @@ final class SessionManager: ObservableObject {
         // Track when status actually changes
         if session.status != oldStatus {
             session.statusChangedAt = now
-            session.spinnerDuration = nil  // clear stale spinner duration on status change
         }
     }
 
@@ -214,8 +213,6 @@ final class SessionManager: ObservableObject {
                 if let tw = result.tmuxWindow { sessions[idx].tmuxWindow = tw }
                 if let twn = result.tmuxWindowName { sessions[idx].tmuxWindowName = twn }
                 if let ctx = result.contextPercent { sessions[idx].contextPercent = ctx }
-                sessions[idx].spinnerDuration = result.spinnerDuration
-
                 // Find transcript path if missing
                 if sessions[idx].transcriptPath == nil || sessions[idx].transcriptPath?.isEmpty == true {
                     sessions[idx].transcriptPath = TrajectoryBuilder.findTranscriptPath(sessionId: sessionId)
@@ -227,26 +224,11 @@ final class SessionManager: ObservableObject {
                     summarizeSession(sessionId: sessionId)
                 }
 
-                // Update status from pane detection — pane is ground truth
-                // BUT: if we recently sent a response, force working for 30s (race condition protection)
+                // Discovery does NOT change status — hooks are the single source of truth.
+                // If recently sent from tracker, force working until a hook fires.
                 let recentlySent = sessions[idx].lastSentAt.map { Date().timeIntervalSince($0) < 30 } ?? false
-                let oldStatus = sessions[idx].status
-                let newStatus = recentlySent ? .working : result.detectedStatus
-
-                // ALWAYS enforce: working sessions do NOT need attention
-                if newStatus == .working {
-                    sessions[idx].needsAttention = false
-                }
-
-                if oldStatus != newStatus {
-                    sessions[idx].status = newStatus
-                    sessions[idx].statusChangedAt = Date()
-
-                    // Transition to idle from working: refresh context silently.
-                    // Don't set needsAttention — only Notification:idle_prompt does that.
-                    if (newStatus == .idle || newStatus == .waitingForInput) && oldStatus == .working {
-                        loadSessionContext(for: &sessions[idx])
-                    }
+                if recentlySent && sessions[idx].status != .working {
+                    sessions[idx].status = .working
                 }
             } else {
                 // New session discovered from filesystem
@@ -255,15 +237,14 @@ final class SessionManager: ObservableObject {
                 session.tmuxWindow = result.tmuxWindow
                 session.tmuxWindowName = result.tmuxWindowName
                 session.contextPercent = result.contextPercent
-                session.status = result.detectedStatus
-                session.spinnerDuration = result.spinnerDuration
+                // New sessions start as idle — hooks will update when events fire
                 // Find transcript and load full context immediately
                 session.transcriptPath = TrajectoryBuilder.findTranscriptPath(sessionId: sessionId)
                 if session.transcriptPath != nil {
                     loadSessionContext(for: &session)
                 }
                 sessions.append(session)
-                log("Discovered: \(session.projectName) (window: \(result.tmuxWindowName ?? "?")) status: \(result.detectedStatus)")
+                log("Discovered: \(session.projectName) (window: \(result.tmuxWindowName ?? "?"))")
                 // Trigger async summarization for new session
                 if session.transcriptPath != nil {
                     summarizeSession(sessionId: sessionId)

@@ -109,8 +109,6 @@ struct SessionState: Identifiable, Codable {
     var statusSummary: String {
         switch status {
         case .working:
-            // Use spinner duration from pane if available (real-time), fall back to status change time
-            if let dur = spinnerDuration { return "Working \(dur)" }
             return "Working \(timeSinceStatusChange)"
         case .idle:
             return "Idle \(timeSinceStatusChange)"
