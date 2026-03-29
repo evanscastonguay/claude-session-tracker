@@ -327,11 +327,79 @@ final class SessionManager: ObservableObject {
             sessions[idx].lastResponse = nil
         }
         updateAttentionState()
-        // Switch tmux window and bring Ghostty to front
+        // Switch tmux window and bring terminal to front
+        let terminalApp = LaunchSettings.load().terminalApp.rawValue
         Task.detached {
             Shell.run("tmux select-window -t \(window)")
-            Shell.run("open -a Ghostty")
+            Shell.run("open -a '\(terminalApp)'")
         }
+    }
+
+    // MARK: - New Session
+
+    /// Launch a new Claude session in a new tmux window
+    func launchNewSession(directory: String, name: String?) {
+        let settings = LaunchSettings.load()
+        let (env, args) = settings.buildCommand()
+
+        let windowName = name ?? URL(fileURLWithPath: directory).lastPathComponent
+
+        Task.detached {
+            // Build tmux command with proper quoting
+            // The claude command needs to be a single string argument to tmux new-window
+            // JSON braces in --settings must survive shell expansion
+            var tmuxArgs = ["tmux", "new-window", "-n", windowName]
+            for (k, v) in env {
+                tmuxArgs.append(contentsOf: ["-e", "\(k)=\(v)"])
+            }
+            tmuxArgs.append(contentsOf: ["-c", directory])
+
+            // Build the claude command as a single shell string
+            // Escape single quotes in the JSON settings arg
+            let claudeCmd = args.map { arg in
+                if arg.contains("{") || arg.contains("}") {
+                    return "'\(arg)'"  // wrap JSON in single quotes
+                }
+                return arg
+            }.joined(separator: " ")
+
+            tmuxArgs.append(claudeCmd)
+
+            // Use Process directly for proper argument passing
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = tmuxArgs
+            try? process.run()
+            process.waitUntilExit()
+        }
+
+        log("Launched new session: \(windowName) in \(directory)")
+    }
+
+    // MARK: - Rename
+
+    /// Rename a session's tmux window
+    func renameSession(_ sessionId: String, to name: String) {
+        guard let idx = sessions.firstIndex(where: { $0.id == sessionId }),
+              let window = sessions[idx].tmuxWindow
+        else { return }
+
+        sessions[idx].tmuxWindowName = name
+        Task.detached {
+            Shell.run("tmux rename-window -t \(window) '\(name)'")
+        }
+        scheduleSave()
+    }
+
+    // MARK: - Manual Refresh
+
+    /// Force refresh context for a specific session from JSONL + re-summarize
+    func refreshSession(_ sessionId: String) {
+        guard let idx = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
+        loadSessionContext(for: &sessions[idx])
+        summarizeSession(sessionId: sessionId)
+        scheduleSave()
+        log("Refreshed: \(sessions[idx].tmuxWindowName ?? sessions[idx].projectName)")
     }
 
     // MARK: - Context Refresh (after sending response)

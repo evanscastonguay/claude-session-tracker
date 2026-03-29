@@ -6,7 +6,6 @@ struct ClaudeTrackerApp: App {
     @StateObject private var sessionManager = SessionManager()
 
     var body: some Scene {
-        // Menu bar icon — click to open/toggle the dashboard window
         MenuBarExtra {
             MenuBarContent(sessionManager: sessionManager)
         } label: {
@@ -16,7 +15,6 @@ struct ClaudeTrackerApp: App {
         }
         .menuBarExtraStyle(.menu)
 
-        // Full dashboard window
         Window("Claude Tracker", id: "dashboard") {
             DashboardView(sessionManager: sessionManager)
                 .frame(minWidth: 500, minHeight: 350)
@@ -27,10 +25,14 @@ struct ClaudeTrackerApp: App {
         .defaultSize(width: 680, height: 520)
         .defaultPosition(.top)
         .keyboardShortcut("b", modifiers: [.command, .shift])
+
+        Window("Settings", id: "settings") {
+            SettingsView()
+        }
+        .defaultSize(width: 420, height: 460)
+        .windowResizability(.contentSize)
     }
 }
-
-// MARK: - Menu bar dropdown content
 
 struct MenuBarContent: View {
     @ObservedObject var sessionManager: SessionManager
@@ -45,9 +47,8 @@ struct MenuBarContent: View {
 
         Divider()
 
-        // Quick session status
         let sessions = sessionManager.sessions
-            .filter { $0.status != .ended }
+            .filter { $0.status != .ended && $0.tmuxWindow != nil }
             .sorted { $0.tabIndex < $1.tabIndex }
 
         ForEach(sessions) { session in
@@ -56,11 +57,17 @@ struct MenuBarContent: View {
                 openWindow(id: "dashboard")
                 NSApp.activate(ignoringOtherApps: true)
             }) {
-                Label("[\(session.tabIndex)] \(session.tmuxWindowName ?? session.projectName) — \(session.statusSummary)", systemImage: icon)
+                Label("[\(session.tabIndex)] \(session.tmuxWindowName ?? session.projectName) \u{2014} \(session.statusSummary)", systemImage: icon)
             }
         }
 
         Divider()
+
+        Button("Settings\u{2026}") {
+            openWindow(id: "settings")
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        .keyboardShortcut(",", modifiers: .command)
 
         Button("Quit") {
             NSApplication.shared.terminate(nil)
@@ -68,8 +75,6 @@ struct MenuBarContent: View {
         .keyboardShortcut("q", modifiers: .command)
     }
 }
-
-// MARK: - AppDelegate for global state
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {

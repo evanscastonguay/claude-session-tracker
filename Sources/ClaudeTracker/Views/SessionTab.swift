@@ -4,8 +4,11 @@ struct SessionTab: View {
     let session: SessionState
     let isFocused: Bool
     let onTap: () -> Void
+    let onRename: (String) -> Void
 
     @State private var dotPhase: CGFloat = 0
+    @State private var isEditing = false
+    @State private var editText = ""
 
     private var needsAction: Bool {
         session.needsAttention || session.status == .waitingForInput
@@ -23,18 +26,32 @@ struct SessionTab: View {
                         .font(.system(size: 12, weight: .bold, design: .rounded))
                         .foregroundStyle(numberColor)
 
-                    Text(session.tmuxWindowName ?? session.projectName)
-                        .font(.system(size: 11, weight: isFocused ? .medium : .regular))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .foregroundStyle(nameColor)
+                    // Name — either editable TextField or static Text
+                    if isEditing {
+                        TextField("", text: $editText)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 11, weight: .medium))
+                            .frame(maxWidth: .infinity)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 2)
+                            .background(Color.primary.opacity(0.08))
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                            .onSubmit { commitRename() }
+                            .onExitCommand { cancelRename() }
+                    } else {
+                        Text(session.tmuxWindowName ?? session.projectName)
+                            .font(.system(size: 11, weight: isFocused ? .medium : .regular))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .foregroundStyle(nameColor)
+                            .onTapGesture(count: 2) { startRename() }
+                    }
 
                     Spacer()
 
                     stateIndicator
                 }
 
-                // Goal subtitle — only on focused tab
                 if isFocused, let problem = session.problemStatement {
                     Text(problem)
                         .font(.system(size: 10))
@@ -55,7 +72,25 @@ struct SessionTab: View {
         .onChange(of: session.status) { startAnimation() }
     }
 
-    // MARK: - State Indicator (compact, right-aligned)
+    // MARK: - Rename
+
+    private func startRename() {
+        editText = session.tmuxWindowName ?? session.projectName
+        isEditing = true
+    }
+
+    private func commitRename() {
+        let name = editText.trimmingCharacters(in: .whitespacesAndNewlines)
+        isEditing = false
+        guard !name.isEmpty else { return }
+        onRename(name)
+    }
+
+    private func cancelRename() {
+        isEditing = false
+    }
+
+    // MARK: - State Indicator
 
     @ViewBuilder
     private var stateIndicator: some View {
@@ -64,7 +99,6 @@ struct SessionTab: View {
                 .controlSize(.mini)
                 .scaleEffect(0.7)
         } else if needsAction {
-            // Needs your input — accent badge
             Text(session.timeSinceStatusChange)
                 .font(.system(size: 9, weight: .bold, design: .monospaced))
                 .foregroundStyle(isFocused ? Color.primary : Color.white)
@@ -73,7 +107,6 @@ struct SessionTab: View {
                 .background(isFocused ? Color.primary.opacity(0.08) : Color.accentColor)
                 .clipShape(Capsule())
         } else if session.status == .idle {
-            // Idle — dim time
             Text(session.timeSinceStatusChange)
                 .font(.system(size: 9, design: .monospaced))
                 .foregroundStyle(Color.gray.opacity(0.4))
@@ -108,11 +141,6 @@ struct SessionTab: View {
     }
 
     // MARK: - Animation
-
-    private func dotOpacity(for index: Int) -> Double {
-        let phase = (dotPhase * 3 + Double(index)).truncatingRemainder(dividingBy: 3)
-        return phase < 1 ? 0.6 : 0.12
-    }
 
     private func startAnimation() {
         if session.status == .working {

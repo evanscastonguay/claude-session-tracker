@@ -180,8 +180,13 @@ enum SessionDiscovery {
             var detectedStatus: SessionStatus = .idle
             var spinnerDuration: String?
 
-            if let parentPid = getParentPid(session.pid),
-               let pane = panes.first(where: { $0.panePid == parentPid }) {
+            // Match Claude PID to tmux pane: check both direct match (tmux launched claude)
+            // and parent match (shell launched claude inside tmux pane)
+            let matchedPane = panes.first(where: { $0.panePid == session.pid })
+                ?? getParentPid(session.pid).flatMap { parentPid in
+                    panes.first(where: { $0.panePid == parentPid })
+                }
+            if let pane = matchedPane {
                 tmuxWindow = pane.sessionWindow
                 tmuxWindowName = pane.windowName
 

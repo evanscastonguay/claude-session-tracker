@@ -4,6 +4,7 @@ struct DashboardView: View {
     @ObservedObject var sessionManager: SessionManager
     @State private var focusedSessionId: String?
     @State private var drafts: [String: String] = [:]
+    @State private var showingNewSession = false
     @FocusState private var isInputFocused: Bool
 
     private func draftBinding(for sessionId: String) -> Binding<String> {
@@ -56,8 +57,36 @@ struct DashboardView: View {
                     isFocused: focusedSession?.id == session.id,
                     onTap: {
                         focusedSessionId = session.id
+                        sessionManager.refreshSession(session.id)
+                    },
+                    onRename: { name in
+                        sessionManager.renameSession(session.id, to: name)
                     }
                 )
+            }
+
+            // New session button
+            Button(action: { showingNewSession = true }) {
+                Image(systemName: "plus")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 28, height: 28)
+                    .background(Color.primary.opacity(0.04))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+            .buttonStyle(.plain)
+            .help("New Claude session")
+            .fileImporter(
+                isPresented: $showingNewSession,
+                allowedContentTypes: [.folder],
+                allowsMultipleSelection: false
+            ) { result in
+                if case .success(let urls) = result, let url = urls.first {
+                    sessionManager.launchNewSession(
+                        directory: url.path,
+                        name: nil
+                    )
+                }
             }
         }
         .padding(.horizontal, 4)
@@ -122,7 +151,7 @@ struct DashboardView: View {
             .foregroundStyle(.secondary)
             .help("Switch to Tab \(session.tabIndex) in Ghostty")
 
-            TextField("Reply\u{2026}", text: draft, axis: .vertical)
+TextField("Reply\u{2026}", text: draft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .lineLimit(1...5)

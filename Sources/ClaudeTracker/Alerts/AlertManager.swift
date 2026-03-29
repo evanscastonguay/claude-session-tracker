@@ -4,17 +4,12 @@ import AppKit
 
 @MainActor
 final class AlertManager: ObservableObject {
-    @Published var soundEnabled = true
-    @Published var notificationsEnabled = true
-
-    private var cooldowns: [String: Date] = [:]  // sessionId -> last alert time
+    private var cooldowns: [String: Date] = [:]
     private let cooldownInterval: TimeInterval = 60
 
     init() {
         requestNotificationPermission()
     }
-
-    // MARK: - Permission
 
     private func requestNotificationPermission() {
         UNUserNotificationCenter.current().requestAuthorization(
@@ -23,43 +18,37 @@ final class AlertManager: ObservableObject {
             if let error = error {
                 print("[AlertManager] Permission error: \(error)")
             }
-            print("[AlertManager] Notifications permission: \(granted)")
         }
     }
 
     // MARK: - Alert Dispatch
 
     func alertIfNeeded(session: SessionState, event: HookEvent) {
-        let sessionId = session.id
+        let settings = LaunchSettings.load()
+        guard settings.soundEnabled else { return }
 
         // Check cooldown
-        if let lastAlert = cooldowns[sessionId],
+        if let lastAlert = cooldowns[session.id],
            Date().timeIntervalSince(lastAlert) < cooldownInterval {
             return
         }
 
         switch event.hookEventName {
         case "Notification":
-            // Claude is waiting for user input
             sendAlert(
                 session: session,
                 title: "Needs Input",
-                body: session.lastUserPrompt.map { "Last: \($0)" } ?? "Session waiting for your input",
-                sound: .glass,
-                urgency: .attention
+                body: session.lastUserPrompt.map { "Last: \($0)" } ?? "Waiting for your input",
+                sound: settings.notificationSound
             )
 
         case "Stop":
-            // Turn complete — only alert if it was working before
-            if session.status == .working || session.status == .idle {
-                sendAlert(
-                    session: session,
-                    title: "Turn Complete",
-                    body: session.lastToolName.map { "Last tool: \($0)" } ?? "Ready for next prompt",
-                    sound: .hero,
-                    urgency: .info
-                )
-            }
+            sendAlert(
+                session: session,
+                title: "Turn Complete",
+                body: session.lastToolName.map { "Last tool: \($0)" } ?? "Ready for next prompt",
+                sound: settings.notificationSound
+            )
 
         default:
             break
@@ -68,67 +57,31 @@ final class AlertManager: ObservableObject {
 
     // MARK: - Alert Sending
 
-    private enum AlertSound: String {
-        case glass = "/System/Library/Sounds/Glass.aiff"
-        case hero = "/System/Library/Sounds/Hero.aiff"
-        case ping = "/System/Library/Sounds/Ping.aiff"
-        case basso = "/System/Library/Sounds/Basso.aiff"
-    }
-
-    private enum AlertUrgency {
-        case info
-        case attention
-        case error
-    }
-
-    private func sendAlert(session: SessionState, title: String, body: String, sound: AlertSound, urgency: AlertUrgency) {
+    private func sendAlert(session: SessionState, title: String, body: String, sound: LaunchSettings.NotificationSound) {
         cooldowns[session.id] = Date()
 
         // Native notification
-        if notificationsEnabled {
-            sendNotification(session: session, title: title, body: body, sound: sound)
-        }
-
-        // Audio
-        if soundEnabled {
-            playSound(sound)
-        }
-    }
-
-    private func sendNotification(session: SessionState, title: String, body: String, sound: AlertSound) {
         let content = UNMutableNotificationContent()
-        content.title = "Claude — \(session.projectName)"
+        content.title = "Claude \u{2014} \(session.tmuxWindowName ?? session.projectName)"
         content.subtitle = title
         content.body = body
         content.sound = .default
 
-        // Use session ID as identifier to replace stale notifications
         let request = UNNotificationRequest(
             identifier: "claude-tracker-\(session.id)",
             content: content,
-            trigger: nil  // deliver immediately
+            trigger: nil
         )
 
-        UNUserNotificationCenter.current().add(request) { error in
-            if let error = error {
-                print("[AlertManager] Notification error: \(error)")
-            }
-        }
-    }
+        UNUserNotificationCenter.current().add(request)
 
-    private func playSound(_ sound: AlertSound) {
+        // Play configured sound
         Task.detached {
-            Shell.run("afplay \(sound.rawValue)")
+            Shell.run("afplay \(sound.path)")
         }
     }
-
-    // MARK: - Cooldown Management
 
     func clearCooldown(for sessionId: String) {
         cooldowns.removeValue(forKey: sessionId)
-    }
-
-    func clearAllCooldowns() {
-        cooldowns.removeAll()
     }
 }
