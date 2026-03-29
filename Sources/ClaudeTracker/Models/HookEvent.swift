@@ -11,6 +11,8 @@ struct HookEvent: Codable {
     let toolInput: [String: AnyCodable]?
     let toolResponse: [String: AnyCodable]?
     let toolUseId: String?
+    // UserPromptSubmit-specific
+    let prompt: String?
     // Stop-specific
     let stopHookActive: Bool?
 
@@ -20,6 +22,7 @@ struct HookEvent: Codable {
         case cwd
         case permissionMode = "permission_mode"
         case hookEventName = "hook_event_name"
+        case prompt
         case toolName = "tool_name"
         case toolInput = "tool_input"
         case toolResponse = "tool_response"

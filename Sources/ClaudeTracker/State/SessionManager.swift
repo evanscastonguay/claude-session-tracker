@@ -87,10 +87,36 @@ final class SessionManager: ObservableObject {
             session.status = .working
             session.needsAttention = false
             session.lastResponse = nil
-            // Extract prompt text from tool_input if available
-            if let input = event.toolInput, let prompt = input["prompt"]?.stringValue {
-                session.lastUserPrompt = String(prompt.prefix(200))
-                session.addTrajectory(type: "prompt", summary: String(prompt.prefix(100)))
+            session.claudeAskedQuestion = false
+            session.claudeQuestion = nil
+            // Extract prompt from the dedicated "prompt" field (confirmed in payload)
+            // Filter out system noise: task notifications, command messages, XML-heavy content
+            if let rawPrompt = event.prompt, !rawPrompt.isEmpty,
+               !rawPrompt.hasPrefix("<task-notification>"),
+               !rawPrompt.hasPrefix("<command-message>"),
+               !rawPrompt.hasPrefix("<system-reminder>"),
+               !rawPrompt.hasPrefix("[Image: source:"),
+               !rawPrompt.hasPrefix("Base directory for this skill:"),
+               rawPrompt.filter({ $0 == "<" }).count <= 3 {
+                // Clean image references from prompt text
+                let promptText = rawPrompt
+                    .replacingOccurrences(of: #"\[Image #\d+\]\s*"#, with: "", options: .regularExpression)
+                    .replacingOccurrences(of: #"\[Image:[^\]]*\]"#, with: "", options: .regularExpression)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !promptText.isEmpty else { break }
+
+                session.lastUserPrompt = promptText
+                session.turnCount += 1
+                session.promptArc.append(String(promptText.prefix(120)))
+                if session.promptArc.count > 20 { session.promptArc.removeFirst() }
+                if session.mission == nil {
+                    session.mission = String(promptText.prefix(300))
+                }
+                session.addTrajectory(type: "prompt", summary: String(promptText.prefix(100)))
+            }
+            // Set transcript path if provided
+            if let tp = event.transcriptPath, !tp.isEmpty {
+                session.transcriptPath = tp
             }
 
         case "PostToolUse":
@@ -99,6 +125,15 @@ final class SessionManager: ObservableObject {
             if let input = event.toolInput {
                 session.lastToolDescription = input["description"]?.stringValue
                     ?? input["command"]?.stringValue.map { String($0.prefix(80)) }
+                // Track files modified by Edit/Write
+                if let toolName = event.toolName,
+                   (toolName == "Edit" || toolName == "Write"),
+                   let filePath = input["file_path"]?.stringValue {
+                    let fileName = (filePath as NSString).lastPathComponent
+                    if !session.filesModified.contains(fileName) {
+                        session.filesModified.append(fileName)
+                    }
+                }
             }
             if let toolName = event.toolName {
                 let desc = session.lastToolDescription ?? ""
@@ -109,15 +144,17 @@ final class SessionManager: ObservableObject {
             session.status = .idle
             session.needsAttention = true
             session.addTrajectory(type: "stop", summary: "Turn complete")
-            // Extract response from JSONL transcript (structured, clean data)
-            loadLastTurn(for: &session)
+            loadSessionContext(for: &session)
+            // Async LLM summarization (runs in background, updates when done)
+            summarizeSession(sessionId: session.id)
 
         case "Notification":
             session.status = .waitingForInput
             session.needsAttention = true
             session.addTrajectory(type: "notification", summary: "Waiting for input")
             log("\(session.projectName) needs attention!")
-            loadLastTurn(for: &session)
+            loadSessionContext(for: &session)
+            summarizeSession(sessionId: session.id)
 
         case "SessionStart":
             session.status = .working
@@ -174,25 +211,32 @@ final class SessionManager: ObservableObject {
                     sessions[idx].transcriptPath = TrajectoryBuilder.findTranscriptPath(sessionId: sessionId)
                 }
 
-                // Update status from pane detection
-                // IMPORTANT: never overwrite needsAttention or lastResponse from discovery —
-                // those are only set by hooks and cleared by user action (switchToSession)
+                // Load context from JSONL if we haven't yet (first discovery with transcript)
+                if sessions[idx].mission == nil && sessions[idx].transcriptPath != nil {
+                    loadSessionContext(for: &sessions[idx])
+                    summarizeSession(sessionId: sessionId)
+                }
+
+                // Update status from pane detection — pane is ground truth
+                // BUT: if we recently sent a response, force working for 30s (race condition protection)
+                let recentlySent = sessions[idx].lastSentAt.map { Date().timeIntervalSince($0) < 30 } ?? false
                 let oldStatus = sessions[idx].status
-                let newStatus = result.detectedStatus
-                let hasAttention = sessions[idx].needsAttention
+                let newStatus = recentlySent ? .working : result.detectedStatus
+
+                // ALWAYS enforce: working sessions do NOT need attention
+                if newStatus == .working {
+                    sessions[idx].needsAttention = false
+                }
 
                 if oldStatus != newStatus {
                     sessions[idx].status = newStatus
                     sessions[idx].statusChangedAt = Date()
 
-                    // On transition to idle from working: load context (only if hooks haven't already set it)
-                    if (newStatus == .idle || newStatus == .waitingForInput) && oldStatus == .working && !hasAttention {
+                    // Transition to idle from working: mark attention + refresh context
+                    if (newStatus == .idle || newStatus == .waitingForInput) && oldStatus == .working {
                         sessions[idx].needsAttention = true
-                        loadLastTurn(for: &sessions[idx])
-                    }
-                    // On transition to working: only clear if user already addressed it
-                    if newStatus == .working && !hasAttention {
-                        sessions[idx].lastResponse = nil
+                        loadSessionContext(for: &sessions[idx])
+                        summarizeSession(sessionId: sessionId)
                     }
                 }
             } else {
@@ -204,8 +248,17 @@ final class SessionManager: ObservableObject {
                 session.contextPercent = result.contextPercent
                 session.status = result.detectedStatus
                 session.spinnerDuration = result.spinnerDuration
+                // Find transcript and load full context immediately
+                session.transcriptPath = TrajectoryBuilder.findTranscriptPath(sessionId: sessionId)
+                if session.transcriptPath != nil {
+                    loadSessionContext(for: &session)
+                }
                 sessions.append(session)
                 log("Discovered: \(session.projectName) (window: \(result.tmuxWindowName ?? "?")) status: \(result.detectedStatus)")
+                // Trigger async summarization for new session
+                if session.transcriptPath != nil {
+                    summarizeSession(sessionId: sessionId)
+                }
             }
         }
 
@@ -281,41 +334,99 @@ final class SessionManager: ObservableObject {
         }
     }
 
+    // MARK: - Context Refresh (after sending response)
+
+    /// Poll the JSONL for updated context after sending a response
+    func scheduleContextRefresh(for sessionId: String, delay: TimeInterval) {
+        // Poll every few seconds for up to 2 minutes to catch Claude's response
+        var attempts = 0
+        let maxAttempts = 15
+
+        func poll() {
+            attempts += 1
+            guard attempts <= maxAttempts,
+                  let idx = sessions.firstIndex(where: { $0.id == sessionId })
+            else { return }
+
+            loadSessionContext(for: &sessions[idx])
+
+            // If we got a new response, mark attention and stop polling
+            if sessions[idx].lastResponse != nil && sessions[idx].status != .working {
+                sessions[idx].needsAttention = true
+                summarizeSession(sessionId: sessionId)
+                scheduleSave()
+                return
+            }
+
+            // Keep polling
+            DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
+                poll()
+            }
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            poll()
+        }
+    }
+
     // MARK: - JSONL-based Response Extraction
 
-    /// Load the last conversation turn from the JSONL transcript
-    private func loadLastTurn(for session: inout SessionState) {
+    /// Load full session context from the JSONL transcript
+    private func loadSessionContext(for session: inout SessionState) {
         // Ensure we have a transcript path
         if session.transcriptPath == nil || session.transcriptPath?.isEmpty == true {
             if let found = TrajectoryBuilder.findTranscriptPath(sessionId: session.id) {
                 session.transcriptPath = found
             }
         }
-        guard let path = session.transcriptPath, !path.isEmpty else {
-            print("[loadLastTurn] No transcript path for \(session.projectName)")
-            return
-        }
+        guard let path = session.transcriptPath, !path.isEmpty else { return }
 
-        // Debug: write to file since stdout isn't visible
-        let debugLog = { (msg: String) in
-            let logPath = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude-tracker/debug.log")
-            let entry = "[\(Date())] \(msg)\n"
-            if let data = entry.data(using: .utf8) {
-                if let handle = try? FileHandle(forWritingTo: logPath) {
-                    handle.seekToEndOfFile()
-                    handle.write(data)
-                    handle.closeFile()
-                } else {
-                    try? data.write(to: logPath)
-                }
+        let ctx = TrajectoryBuilder.extractFullContext(from: path)
+
+        // Apply all context to session
+        session.lastResponse = ctx.lastResponse
+        if let prompt = ctx.lastUserPrompt { session.lastUserPrompt = prompt }
+        if let m = ctx.mission { session.mission = m }
+        // problemStatement and currentTask are set by LLM summarizer, not JSONL parsing
+        // Fallback: use JSONL-derived values if summarizer hasn't run yet
+        if session.problemStatement == nil, let ps = ctx.problemStatement { session.problemStatement = ps }
+        if session.currentTask == nil, let ct = ctx.currentTask { session.currentTask = ct }
+        if let b = ctx.gitBranch { session.gitBranch = b }
+        if !ctx.promptArc.isEmpty { session.promptArc = ctx.promptArc }
+        session.claudeAskedQuestion = ctx.claudeQuestion != nil
+        session.claudeQuestion = ctx.claudeQuestion
+        session.turnCount = ctx.turnCount
+        if !ctx.filesModified.isEmpty { session.filesModified = ctx.filesModified }
+        if !ctx.recentExchanges.isEmpty { session.recentExchanges = ctx.recentExchanges }
+    }
+
+    // MARK: - LLM Summarization
+
+    /// Run Claude haiku to generate problem + task summaries (async, non-blocking)
+    private func summarizeSession(sessionId: String) {
+        guard let idx = sessions.firstIndex(where: { $0.id == sessionId }),
+              let tp = sessions[idx].transcriptPath, !tp.isEmpty
+        else { return }
+
+        let projectName = sessions[idx].projectName
+        let cwd = sessions[idx].cwd
+
+        Task.detached {
+            let summary = ContextSummarizer.summarize(
+                transcriptPath: tp,
+                projectName: projectName,
+                cwd: cwd
+            )
+
+            await MainActor.run { [weak self] in
+                guard let self = self,
+                      let idx = self.sessions.firstIndex(where: { $0.id == sessionId }),
+                      let summary = summary
+                else { return }
+                self.sessions[idx].problemStatement = summary.problem
+                self.sessions[idx].currentTask = summary.task
+                self.scheduleSave()
             }
-        }
-        debugLog("loadLastTurn path=\(path)")
-        let turn = TrajectoryBuilder.getLastTurn(from: path)
-        debugLog("result: prompt=\(turn.userPrompt?.prefix(80) ?? "nil") response_len=\(turn.assistantResponse?.count ?? -1)")
-        session.lastResponse = turn.assistantResponse
-        if let prompt = turn.userPrompt {
-            session.lastUserPrompt = prompt
         }
     }
 

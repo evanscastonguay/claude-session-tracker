@@ -8,6 +8,18 @@ enum SessionStatus: String, Codable {
     case ended
 }
 
+struct Exchange: Codable, Identifiable {
+    let id: UUID
+    let userPrompt: String
+    let assistantResponse: String
+
+    init(userPrompt: String, assistantResponse: String) {
+        self.id = UUID()
+        self.userPrompt = userPrompt
+        self.assistantResponse = assistantResponse
+    }
+}
+
 struct TrajectoryEntry: Codable, Identifiable {
     let id: UUID
     let timestamp: Date
@@ -42,8 +54,21 @@ struct SessionState: Identifiable, Codable {
     var pid: Int?
     var permissionMode: String?
     var trajectory: [TrajectoryEntry]
-    var lastResponse: String?           // Claude's last output captured from pane on completion
+    var lastResponse: String?           // Claude's last text response from JSONL
+    var recentExchanges: [Exchange] = [] // last 3 prompt→response pairs
     var needsAttention: Bool = false    // auto-expand flag: set on completion, cleared on switch
+
+    // Context recovery fields
+    var gitBranch: String?              // from JSONL entries
+    var mission: String?                // first user prompt = session goal
+    var promptArc: [String] = []        // sampled user prompts showing the journey
+    var claudeAskedQuestion: Bool = false
+    var claudeQuestion: String?
+    var turnCount: Int = 0
+    var filesModified: [String] = []
+    var currentTask: String?
+    var problemStatement: String?
+    var lastSentAt: Date?               // when we last sent a response — forces working state for 30s
 
     init(sessionId: String, cwd: String) {
         self.id = sessionId
