@@ -17,24 +17,34 @@ struct SessionTab: View {
 
     var body: some View {
         Button(action: onTap) {
-            HStack(spacing: 6) {
-                // Number
-                Text("\(session.tabIndex)")
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
-                    .foregroundStyle(numberColor)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text("\(session.tabIndex)")
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .foregroundStyle(numberColor)
 
-                // Name
-                Text(session.tmuxWindowName ?? session.projectName)
-                    .font(.system(size: 11, weight: isFocused ? .medium : .regular))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .foregroundStyle(nameColor)
+                    Text(session.tmuxWindowName ?? session.projectName)
+                        .font(.system(size: 11, weight: isFocused ? .medium : .regular))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .foregroundStyle(nameColor)
 
-                // State indicator (right side)
-                stateIndicator
+                    Spacer()
+
+                    stateIndicator
+                }
+
+                // Goal subtitle — only on focused tab
+                if isFocused, let problem = session.problemStatement {
+                    Text(problem)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
             }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 7)
             .padding(.horizontal, 10)
             .background(background)
             .clipShape(RoundedRectangle(cornerRadius: 8))

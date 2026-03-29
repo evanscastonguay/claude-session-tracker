@@ -35,8 +35,8 @@ struct DashboardView: View {
                 emptyView
             } else {
                 tabBar
-                Divider()
                 if let session = focusedSession {
+                    Divider()
                     contentArea(session)
                     Divider()
                     inputBar(session)
@@ -195,23 +195,7 @@ struct DashboardView: View {
     private func conversationText(_ session: SessionState) -> AttributedString {
         var result = AttributedString()
 
-        // Problem statement at top — labeled, italic, visually distinct
-        if let problem = session.problemStatement {
-            var label = AttributedString("Goal: ")
-            label.foregroundColor = NSColor.tertiaryLabelColor
-            label.font = .system(size: 11).italic()
-            result.append(label)
-
-            var ctx = AttributedString(problem)
-            ctx.foregroundColor = NSColor.tertiaryLabelColor
-            ctx.font = .system(size: 11).italic()
-            result.append(ctx)
-
-            var divider = AttributedString("\n\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\n\n")
-            divider.foregroundColor = NSColor.separatorColor
-            divider.font = .system(size: 8)
-            result.append(divider)
-        }
+        // Problem statement removed from conversation text — shown in header instead
 
         // Build exchanges list
         let exchanges: [Exchange]
