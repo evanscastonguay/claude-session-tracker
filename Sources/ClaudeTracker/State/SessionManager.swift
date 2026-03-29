@@ -420,22 +420,27 @@ final class SessionManager: ObservableObject {
             queue: DispatchQueue.global(qos: .userInitiated)
         )
 
+        var debounceWork: DispatchWorkItem?
         source.setEventHandler { [weak self] in
-            Task { @MainActor in
-                guard let self = self,
-                      let idx = self.sessions.firstIndex(where: { $0.id == sessionId })
-                else { return }
+            // Debounce: wait 300ms after last write before reading
+            // Prevents reading mid-write (truncated JSON)
+            debounceWork?.cancel()
+            debounceWork = DispatchWorkItem {
+                Task { @MainActor in
+                    guard let self = self,
+                          let idx = self.sessions.firstIndex(where: { $0.id == sessionId })
+                    else { return }
 
-                let wasWorking = self.sessions[idx].status == .working
-                let hadResponse = self.sessions[idx].lastResponse
+                    let wasWorking = self.sessions[idx].status == .working
+                    let hadResponse = self.sessions[idx].lastResponse
 
-                self.loadSessionContext(for: &self.sessions[idx])
+                    self.loadSessionContext(for: &self.sessions[idx])
 
-                // Detect completion: was working + now has a NEW response
-                let hasNewResponse = self.sessions[idx].lastResponse != nil
-                    && self.sessions[idx].lastResponse != hadResponse
+                    // Detect completion: was working + now has a NEW response
+                    let hasNewResponse = self.sessions[idx].lastResponse != nil
+                        && self.sessions[idx].lastResponse != hadResponse
 
-                if wasWorking && hasNewResponse {
+                    if wasWorking && hasNewResponse {
                     self.sessions[idx].status = .idle
                     self.sessions[idx].needsAttention = true
                     self.sessions[idx].lastSentAt = nil
@@ -462,7 +467,9 @@ final class SessionManager: ObservableObject {
                 }
 
                 self.updateAttentionState()
+                }
             }
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.3, execute: debounceWork!)
         }
 
         source.setCancelHandler {
