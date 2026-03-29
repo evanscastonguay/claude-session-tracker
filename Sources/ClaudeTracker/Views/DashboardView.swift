@@ -38,9 +38,7 @@ struct DashboardView: View {
                 tabBar
                 if let session = focusedSession {
                     Divider()
-                    contentArea(session)
-                    Divider()
-                    inputBar(session)
+                    focusedPanel(session)
                 }
             }
         }
@@ -48,15 +46,8 @@ struct DashboardView: View {
         .onChange(of: sessionManager.focusSessionRequest) {
             if let id = sessionManager.focusSessionRequest {
                 focusedSessionId = id
-                sessionManager.refreshSession(id)
-                sessionManager.watchSession(id)
                 sessionManager.focusSessionRequest = nil
                 isInputFocused = true
-            }
-        }
-        .onAppear {
-            if let session = focusedSession {
-                sessionManager.watchSession(session.id)
             }
         }
     }
@@ -69,18 +60,13 @@ struct DashboardView: View {
                 SessionTab(
                     session: session,
                     isFocused: focusedSession?.id == session.id,
-                    onTap: {
-                        focusedSessionId = session.id
-                        sessionManager.refreshSession(session.id)
-                        sessionManager.watchSession(session.id)
-                    },
+                    onTap: { focusedSessionId = session.id },
                     onRename: { name in
                         sessionManager.renameSession(session.id, to: name)
                     }
                 )
             }
 
-            // New session button
             Button(action: { showingNewSession = true }) {
                 Image(systemName: "plus")
                     .font(.system(size: 12, weight: .medium))
@@ -109,45 +95,65 @@ struct DashboardView: View {
         .padding(.vertical, 4)
     }
 
-    // MARK: - Content Area
+    // MARK: - Focused Panel (status + context + actions)
 
-    private func contentArea(_ session: SessionState) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 8) {
-
-                // Everything as one selectable text block
-                if session.status == .working {
-                    if !conversationText(session).characters.isEmpty {
-                        Text(conversationText(session))
-                            .font(.system(size: 12.5))
-                            .lineSpacing(3)
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 16)
-                    }
-                    VStack(spacing: 12) {
-                        Spacer()
-                        ProgressView()
-                            .controlSize(.regular)
-                        Text("Claude is working\u{2026}")
-                            .font(.system(size: 13))
-                            .foregroundStyle(.secondary)
+    private func focusedPanel(_ session: SessionState) -> some View {
+        VStack(spacing: 0) {
+            // Context area
+            VStack(alignment: .leading, spacing: 12) {
+                // Session name + wait time
+                HStack {
+                    Text(session.tmuxWindowName ?? session.projectName)
+                        .font(.system(size: 16, weight: .semibold))
+                    Spacer()
+                    if session.status == .working {
+                        HStack(spacing: 5) {
+                            ProgressView().controlSize(.mini)
+                            Text("Working \(session.timeSinceStatusChange)")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                        }
+                    } else if session.needsAttention {
                         Text(session.timeSinceStatusChange)
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(Color.accentColor)
+                    } else {
+                        Text("Idle \(session.timeSinceStatusChange)")
+                            .font(.system(size: 12))
                             .foregroundStyle(.tertiary)
-                        Spacer()
                     }
-                    .frame(maxWidth: .infinity)
-                } else {
-                    Text(conversationText(session))
-                        .font(.system(size: 12.5))
-                        .lineSpacing(3)
+                }
+
+                // Problem statement — what this session is about
+                if let problem = session.problemStatement {
+                    Text(problem)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
                         .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 16)
+                }
+
+                // Open in terminal button
+                if session.tmuxWindow != nil {
+                    Button(action: { sessionManager.switchToSession(session) }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "rectangle.portrait.and.arrow.right")
+                            Text("Open in Terminal")
+                        }
+                        .font(.system(size: 13))
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.regular)
                 }
             }
-            .padding(.vertical, 12)
+            .padding(16)
+
+            Spacer()
+
+            // Quick reply bar
+            Divider()
+            inputBar(session)
         }
     }
 
@@ -157,18 +163,10 @@ struct DashboardView: View {
         let draft = draftBinding(for: session.id)
 
         return HStack(alignment: .bottom, spacing: 8) {
-            Button(action: { sessionManager.switchToSession(session) }) {
-                Image(systemName: "arrow.forward.square")
-                    .font(.system(size: 16))
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .help("Switch to Tab \(session.tabIndex) in Ghostty")
-
-TextField("Reply\u{2026}", text: draft, axis: .vertical)
+            TextField("Quick reply\u{2026}", text: draft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
-                .lineLimit(1...5)
+                .lineLimit(1...3)
                 .focused($isInputFocused)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
@@ -179,9 +177,7 @@ TextField("Reply\u{2026}", text: draft, axis: .vertical)
                         .stroke(Color.primary.opacity(0.1), lineWidth: 1)
                 )
                 .onKeyPress(.return, phases: .down) { keyPress in
-                    if keyPress.modifiers.contains(.shift) {
-                        return .ignored
-                    }
+                    if keyPress.modifiers.contains(.shift) { return .ignored }
                     sendResponse(to: session)
                     return .handled
                 }
@@ -200,7 +196,6 @@ TextField("Reply\u{2026}", text: draft, axis: .vertical)
 
     // MARK: - Actions
 
-    /// Send text to the session's tmux pane without switching focus
     private func sendResponse(to session: SessionState) {
         let text = (drafts[session.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, let window = session.tmuxWindow else { return }
@@ -209,114 +204,20 @@ TextField("Reply\u{2026}", text: draft, axis: .vertical)
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "'", with: "'\\''")
 
-        let sessionId = session.id
-
         Task.detached {
             Shell.run("tmux send-keys -t \(window).0 '\(escaped)' Enter")
         }
 
         drafts[session.id] = ""
-        // Update state: set working, clear attention, store what we sent as lastUserPrompt
-        // Set lastSentAt to prevent discovery from overriding working status for 30s
-        if let idx = sessionManager.sessions.firstIndex(where: { $0.id == sessionId }) {
+        if let idx = sessionManager.sessions.firstIndex(where: { $0.id == session.id }) {
             sessionManager.sessions[idx].needsAttention = false
             sessionManager.sessions[idx].status = .working
-            sessionManager.sessions[idx].lastUserPrompt = text
-            sessionManager.sessions[idx].lastResponse = nil
             sessionManager.sessions[idx].statusChangedAt = Date()
             sessionManager.sessions[idx].lastSentAt = Date()
         }
-
-        // Poll JSONL for Claude's response after a delay
-        sessionManager.scheduleContextRefresh(for: sessionId, delay: 8)
     }
 
     // MARK: - Empty
-
-    // MARK: - Conversation Text Builder
-
-    private func conversationText(_ session: SessionState) -> AttributedString {
-        var result = AttributedString()
-
-        // Problem statement removed from conversation text — shown in header instead
-
-        // Build exchanges list
-        let exchanges: [Exchange]
-        if !session.recentExchanges.isEmpty {
-            exchanges = session.recentExchanges
-        } else if let prompt = session.lastUserPrompt {
-            exchanges = [Exchange(
-                userPrompt: prompt,
-                assistantResponse: session.lastResponse ?? ""
-            )]
-        } else {
-            return result
-        }
-
-        for (i, exchange) in exchanges.enumerated() {
-            let isLatest = (i == exchanges.count - 1)
-
-            // "You:" label
-            var youLabel = AttributedString("You: ")
-            youLabel.foregroundColor = NSColor.controlAccentColor.withAlphaComponent(0.7)
-            youLabel.font = .system(size: isLatest ? 12.5 : 11, weight: .semibold)
-            result.append(youLabel)
-
-            // Prompt
-            let promptStr = isLatest ? exchange.userPrompt : String(exchange.userPrompt.prefix(150))
-            var promptText = AttributedString(promptStr)
-            promptText.foregroundColor = isLatest ? NSColor.secondaryLabelColor : NSColor.tertiaryLabelColor
-            promptText.font = .system(size: isLatest ? 12.5 : 11)
-            result.append(promptText)
-
-            result.append(AttributedString("\n\n"))
-
-            // "Claude:" label
-            var claudeLabel = AttributedString("Claude: ")
-            claudeLabel.foregroundColor = NSColor.secondaryLabelColor
-            claudeLabel.font = .system(size: isLatest ? 13 : 11, weight: .semibold)
-            result.append(claudeLabel)
-
-            // Response
-            let responseStr = isLatest
-                ? exchange.assistantResponse
-                : String(exchange.assistantResponse.prefix(200))
-            var response = AttributedString(responseStr)
-            response.foregroundColor = isLatest ? NSColor.labelColor.withAlphaComponent(0.85) : NSColor.tertiaryLabelColor
-            response.font = .system(size: isLatest ? 13 : 11)
-            result.append(response)
-
-            // Separator
-            if !isLatest {
-                var sep = AttributedString("\n\n\u{2500}\u{2500}\u{2500}\n\n")
-                sep.foregroundColor = NSColor.separatorColor
-                sep.font = .system(size: 9)
-                result.append(sep)
-            }
-        }
-
-        // Append current unpaired prompt if working (user just typed, Claude hasn't responded yet)
-        if session.status == .working,
-           let currentPrompt = session.lastUserPrompt,
-           exchanges.last?.userPrompt != currentPrompt {
-            var sep = AttributedString("\n\n\u{2500}\u{2500}\u{2500}\n\n")
-            sep.foregroundColor = NSColor.separatorColor
-            sep.font = .system(size: 9)
-            result.append(sep)
-
-            var youLabel = AttributedString("You: ")
-            youLabel.foregroundColor = NSColor.controlAccentColor.withAlphaComponent(0.7)
-            youLabel.font = .system(size: 12.5, weight: .semibold)
-            result.append(youLabel)
-
-            var promptText = AttributedString(currentPrompt)
-            promptText.foregroundColor = NSColor.secondaryLabelColor
-            promptText.font = .system(size: 12.5)
-            result.append(promptText)
-        }
-
-        return result
-    }
 
     private var emptyView: some View {
         VStack(spacing: 8) {

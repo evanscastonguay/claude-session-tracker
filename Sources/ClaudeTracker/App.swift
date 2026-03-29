@@ -24,7 +24,7 @@ struct ClaudeTrackerApp: App {
 
         Window("Claude Tracker", id: "dashboard") {
             DashboardView(sessionManager: sessionManager)
-                .frame(minWidth: 500, minHeight: 350)
+                .frame(minWidth: 400, minHeight: 180)
                 .onAppear {
                     consumePendingFocus(sessionManager: sessionManager)
                     NSApp.activate(ignoringOtherApps: true)
@@ -33,7 +33,7 @@ struct ClaudeTrackerApp: App {
                     consumePendingFocus(sessionManager: sessionManager)
                 }
         }
-        .defaultSize(width: 680, height: 520)
+        .defaultSize(width: 560, height: 280)
         .defaultPosition(.top)
         .keyboardShortcut("b", modifiers: [.command, .shift])
         .handlesExternalEvents(matching: ["dashboard", "focus"])
