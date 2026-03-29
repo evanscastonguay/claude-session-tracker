@@ -112,62 +112,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func handleNotificationClick(_ notification: Notification) {
-        let sessionId = notification.userInfo?["sessionId"] as? String
-
-        // 1. Store the pending focus
-        if let sessionId = sessionId {
+        if let sessionId = notification.userInfo?["sessionId"] as? String {
             AppCoordinator.shared.pendingSessionFocus = sessionId
         }
 
-        // 2. Open the dashboard via URL scheme — this CREATES the window if it doesn't exist
-        //    SwiftUI's .handlesExternalEvents(matching:) picks this up
+        // Open dashboard via URL scheme + activate once
         if let url = URL(string: "claudetracker://dashboard") {
             NSWorkspace.shared.open(url)
         }
-
-        // 3. Activate with escalating attempts
-        activateApp()
-    }
-
-    private func activateApp() {
-        // Attempt 1: immediate
-        NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
-
-        // Attempt 2: after window has time to appear
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            NSApp.activate(ignoringOtherApps: true)
-            // Find and force-show the window
-            for window in NSApp.windows {
-                if window.title.contains("Claude Tracker") ||
-                   window.identifier?.rawValue.contains("dashboard") == true {
-                    window.makeKeyAndOrderFront(nil)
-                    window.orderFrontRegardless()
-                    break
-                }
-            }
-        }
-
-        // Attempt 3: final activation after everything settles
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-            NSApp.activate(ignoringOtherApps: true)
-        }
-
-        // Hide dock icon after window is stable
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-            NSApp.setActivationPolicy(.accessory)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                NSApp.activate(ignoringOtherApps: true)
-            }
-        }
     }
 
-    // Handle URL scheme directly
     func application(_ application: NSApplication, open urls: [URL]) {
-        for url in urls {
-            if url.scheme == "claudetracker" {
-                activateApp()
-            }
-        }
+        NSApp.activate(ignoringOtherApps: true)
     }
 }
