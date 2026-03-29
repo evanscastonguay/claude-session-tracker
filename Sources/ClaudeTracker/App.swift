@@ -4,7 +4,6 @@ import SwiftUI
 struct ClaudeTrackerApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var sessionManager = SessionManager()
-    @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
         MenuBarExtra {
@@ -20,13 +19,6 @@ struct ClaudeTrackerApp: App {
             DashboardView(sessionManager: sessionManager)
                 .frame(minWidth: 500, minHeight: 350)
                 .onAppear {
-                    NSApp.activate(ignoringOtherApps: true)
-                }
-                .onReceive(NotificationCenter.default.publisher(for: .openSessionFromNotification)) { notif in
-                    if let sessionId = notif.userInfo?["sessionId"] as? String {
-                        sessionManager.focusSessionRequest = sessionId
-                        sessionManager.refreshSession(sessionId)
-                    }
                     NSApp.activate(ignoringOtherApps: true)
                 }
         }
@@ -88,5 +80,44 @@ struct MenuBarContent: View {
 class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+
+        // Listen for notification clicks — open the dashboard window
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleOpenSession),
+            name: .openSessionFromNotification,
+            object: nil
+        )
+    }
+
+    @objc func handleOpenSession(_ notification: Notification) {
+        // Bring app to front
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+
+        // Find or create the dashboard window
+        if let window = NSApp.windows.first(where: {
+            $0.title == "Claude Tracker" || $0.identifier?.rawValue.contains("dashboard") == true
+        }) {
+            window.makeKeyAndOrderFront(nil)
+        }
+
+        // Set focus request on session manager (picked up by DashboardView onChange)
+        if let sessionId = notification.userInfo?["sessionId"] as? String {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                NotificationCenter.default.post(
+                    name: Notification.Name("focusSession"),
+                    object: nil,
+                    userInfo: ["sessionId": sessionId]
+                )
+            }
+        }
+
+        // Hide dock icon again after window is shown
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+            NSApp.setActivationPolicy(.accessory)
+            // Re-activate after policy change to keep window focused
+            NSApp.activate(ignoringOtherApps: true)
+        }
     }
 }

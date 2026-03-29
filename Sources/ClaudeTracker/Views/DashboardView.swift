@@ -52,6 +52,12 @@ struct DashboardView: View {
                 sessionManager.focusSessionRequest = nil
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("focusSession"))) { notif in
+            if let sessionId = notif.userInfo?["sessionId"] as? String {
+                focusedSessionId = sessionId
+                sessionManager.refreshSession(sessionId)
+            }
+        }
     }
 
     // MARK: - Tab Bar

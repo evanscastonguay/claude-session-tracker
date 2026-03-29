@@ -2,7 +2,6 @@ import Foundation
 import UserNotifications
 import AppKit
 
-/// Notification name posted when user clicks a macOS notification banner
 extension Notification.Name {
     static let openSessionFromNotification = Notification.Name("openSessionFromNotification")
 }
@@ -18,7 +17,7 @@ final class AlertManager: NSObject, ObservableObject, UNUserNotificationCenterDe
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
     }
 
-    // MARK: - User clicks notification banner → open tracker
+    // MARK: - User clicks notification → open tracker
 
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
@@ -28,7 +27,6 @@ final class AlertManager: NSObject, ObservableObject, UNUserNotificationCenterDe
         let sessionId = response.notification.request.identifier
             .replacingOccurrences(of: "claude-tracker-", with: "")
 
-        // Post notification — the App scene picks this up to open the window
         DispatchQueue.main.async {
             NotificationCenter.default.post(
                 name: .openSessionFromNotification,
@@ -44,7 +42,8 @@ final class AlertManager: NSObject, ObservableObject, UNUserNotificationCenterDe
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        completionHandler([.banner, .sound])
+        // Show banner but NO system sound — we play our own
+        completionHandler([.banner])
     }
 
     // MARK: - Alert
@@ -58,17 +57,17 @@ final class AlertManager: NSObject, ObservableObject, UNUserNotificationCenterDe
 
         let settings = LaunchSettings.load()
 
-        // Sound
+        // Sound — ONLY our configured sound, no macOS default
         if settings.soundEnabled {
             let path = settings.notificationSound.path
             Task.detached { Shell.run("afplay '\(path)'") }
         }
 
-        // macOS notification — user clicks it to open tracker
+        // Notification banner — no sound (we handle sound ourselves)
         let content = UNMutableNotificationContent()
         content.title = session.tmuxWindowName ?? session.projectName
         content.body = "Waiting for your input"
-        content.sound = .default
+        // No content.sound — we play our own via afplay
 
         UNUserNotificationCenter.current().add(
             UNNotificationRequest(
