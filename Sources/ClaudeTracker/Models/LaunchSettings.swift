@@ -16,22 +16,6 @@ struct LaunchSettings: Codable {
     var autoSummarize: Bool = true
     var discoveryInterval: Int = 10
     var dockBounce: Bool = true
-    var autoBringToFront: Bool = false
-    var focusTarget: FocusTarget = .tracker
-
-    enum FocusTarget: String, Codable, CaseIterable, Identifiable {
-        case tracker = "tracker"
-        case terminal = "terminal"
-        case none = "none"
-        var id: String { rawValue }
-        var displayName: String {
-            switch self {
-            case .tracker: return "Claude Tracker"
-            case .terminal: return "Terminal (Ghostty)"
-            case .none: return "No auto-focus"
-            }
-        }
-    }
 
     // MARK: - Enums
 

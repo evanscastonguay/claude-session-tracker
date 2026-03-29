@@ -27,16 +27,6 @@ final class SessionManager: ObservableObject {
         startServer()
         startDiscovery()
 
-        // Wire alert callbacks
-        alertManager.onFocusSession = { [weak self] sessionId in
-            self?.focusSessionRequest = sessionId
-        }
-        alertManager.onSwitchToTerminal = { [weak self] session in
-            self?.switchToSession(session)
-        }
-        alertManager.getSession = { [weak self] sessionId in
-            self?.sessions.first(where: { $0.id == sessionId })
-        }
     }
 
     // MARK: - Server

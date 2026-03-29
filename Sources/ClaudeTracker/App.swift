@@ -4,6 +4,7 @@ import SwiftUI
 struct ClaudeTrackerApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var sessionManager = SessionManager()
+    @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
         MenuBarExtra {
@@ -19,6 +20,13 @@ struct ClaudeTrackerApp: App {
             DashboardView(sessionManager: sessionManager)
                 .frame(minWidth: 500, minHeight: 350)
                 .onAppear {
+                    NSApp.activate(ignoringOtherApps: true)
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .openSessionFromNotification)) { notif in
+                    if let sessionId = notif.userInfo?["sessionId"] as? String {
+                        sessionManager.focusSessionRequest = sessionId
+                        sessionManager.refreshSession(sessionId)
+                    }
                     NSApp.activate(ignoringOtherApps: true)
                 }
         }

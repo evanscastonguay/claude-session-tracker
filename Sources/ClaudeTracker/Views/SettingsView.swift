@@ -52,12 +52,6 @@ struct SettingsView: View {
                             }
                         }
 
-                        row("Focus") {
-                            Picker("", selection: $settings.focusTarget) {
-                                ForEach(LaunchSettings.FocusTarget.allCases) { Text($0.displayName).tag($0) }
-                            }.frame(width: 160)
-                        }
-
                         row("Dock bounce") {
                             Toggle("", isOn: $settings.dockBounce)
                                 .toggleStyle(.switch)
@@ -118,8 +112,6 @@ struct SettingsView: View {
         .onChange(of: settings.autoSummarize) { save() }
         .onChange(of: settings.discoveryInterval) { save() }
         .onChange(of: settings.dockBounce) { save() }
-        .onChange(of: settings.autoBringToFront) { save() }
-        .onChange(of: settings.focusTarget) { save() }
     }
 
     private func save() { settings.save() }
