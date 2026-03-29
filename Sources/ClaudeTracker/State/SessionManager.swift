@@ -425,7 +425,42 @@ final class SessionManager: ObservableObject {
                 guard let self = self,
                       let idx = self.sessions.firstIndex(where: { $0.id == sessionId })
                 else { return }
+
+                let wasWorking = self.sessions[idx].status == .working
+                let hadResponse = self.sessions[idx].lastResponse
+
                 self.loadSessionContext(for: &self.sessions[idx])
+
+                // Detect completion: was working + now has a NEW response
+                let hasNewResponse = self.sessions[idx].lastResponse != nil
+                    && self.sessions[idx].lastResponse != hadResponse
+
+                if wasWorking && hasNewResponse {
+                    self.sessions[idx].status = .idle
+                    self.sessions[idx].needsAttention = true
+                    self.sessions[idx].lastSentAt = nil
+                    self.sessions[idx].statusChangedAt = Date()
+
+                    // Trigger alert (sound + notification)
+                    let event = HookEvent(
+                        sessionId: sessionId,
+                        transcriptPath: path,
+                        cwd: self.sessions[idx].cwd,
+                        permissionMode: nil,
+                        hookEventName: "Notification",
+                        toolName: nil,
+                        toolInput: nil,
+                        toolResponse: nil,
+                        toolUseId: nil,
+                        prompt: nil,
+                        stopHookActive: nil
+                    )
+                    self.alertManager.alertIfNeeded(
+                        session: self.sessions[idx],
+                        event: event
+                    )
+                }
+
                 self.updateAttentionState()
             }
         }
