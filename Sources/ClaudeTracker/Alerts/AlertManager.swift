@@ -6,10 +6,8 @@ import AppKit
 final class AlertManager: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
     private var cooldowns: [String: Date] = [:]
     private let cooldownInterval: TimeInterval = 60
-    private var soundLoopProcess: Process?
-    private var loopingForSession: String?
+    @Published var isLooping = false
 
-    /// Called when user clicks a notification
     var onNotificationTapped: ((String) -> Void)?
 
     override init() {
@@ -33,9 +31,8 @@ final class AlertManager: NSObject, ObservableObject, UNUserNotificationCenterDe
     ) {
         let sessionId = response.notification.request.identifier
             .replacingOccurrences(of: "claude-tracker-", with: "")
-
         Task { @MainActor in
-            stopSoundLoop()
+            stopLoop()
             NSApp.activate(ignoringOtherApps: true)
             onNotificationTapped?(sessionId)
         }
@@ -55,21 +52,20 @@ final class AlertManager: NSObject, ObservableObject, UNUserNotificationCenterDe
     func alertIfNeeded(session: SessionState, event: HookEvent) {
         let settings = LaunchSettings.load()
 
+        let isCompletion = event.hookEventName == "Notification" || event.hookEventName == "Stop"
+        guard isCompletion else { return }
+
         // Check cooldown
         if let lastAlert = cooldowns[session.id],
            Date().timeIntervalSince(lastAlert) < cooldownInterval {
             return
         }
-
-        let isCompletion = event.hookEventName == "Notification" || event.hookEventName == "Stop"
-        guard isCompletion else { return }
-
         cooldowns[session.id] = Date()
 
-        // 1. Sound (loop or single)
+        // 1. Sound
         if settings.soundEnabled {
             if settings.loopSound {
-                startSoundLoop(sound: settings.notificationSound, sessionId: session.id)
+                startLoop(sound: settings.notificationSound)
             } else {
                 playOnce(sound: settings.notificationSound)
             }
@@ -82,7 +78,6 @@ final class AlertManager: NSObject, ObservableObject, UNUserNotificationCenterDe
             ? "Waiting for your input"
             : "Turn complete"
         content.sound = .default
-
         let request = UNNotificationRequest(
             identifier: "claude-tracker-\(session.id)",
             content: content,
@@ -121,40 +116,48 @@ final class AlertManager: NSObject, ObservableObject, UNUserNotificationCenterDe
         }
     }
 
-    // MARK: - Sound
+    // MARK: - Sound Loop
 
     private func playOnce(sound: LaunchSettings.NotificationSound) {
         Task.detached {
-            Shell.run("afplay \(sound.path)")
+            Shell.run("afplay '\(sound.path)'")
         }
     }
 
-    /// Loop the sound every 5 seconds until acknowledged
-    private func startSoundLoop(sound: LaunchSettings.NotificationSound, sessionId: String) {
-        stopSoundLoop()
-        loopingForSession = sessionId
-
+    private func startLoop(sound: LaunchSettings.NotificationSound) {
+        isLooping = true
+        let path = sound.path
         Task.detached { [weak self] in
-            while await self?.loopingForSession == sessionId {
-                Shell.run("afplay \(sound.path)")
-                try? await Task.sleep(for: .seconds(4))
+            while true {
+                // Check flag on main actor
+                let shouldContinue = await MainActor.run { self?.isLooping ?? false }
+                guard shouldContinue else { break }
+
+                // Play sound (blocks ~1s)
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/usr/bin/afplay")
+                process.arguments = [path]
+                try? process.run()
+                process.waitUntilExit()
+
+                // Wait between loops
+                try? await Task.sleep(for: .seconds(3))
             }
         }
     }
 
-    /// Stop the looping sound — called when user acknowledges
-    func stopSoundLoop() {
-        loopingForSession = nil
-    }
-
-    /// Acknowledge a session — stops sound loop and clears cooldown
-    func acknowledge(sessionId: String) {
-        if loopingForSession == sessionId {
-            stopSoundLoop()
+    /// Stop loop — kills any playing sound immediately
+    func stopLoop() {
+        guard isLooping else { return }
+        isLooping = false
+        // Kill any running afplay processes started by us
+        Task.detached {
+            Shell.run("pkill -f 'afplay.*Library/Sounds' 2>/dev/null")
         }
     }
 
-    func clearCooldown(for sessionId: String) {
+    func acknowledge(sessionId: String) {
+        stopLoop()
         cooldowns.removeValue(forKey: sessionId)
     }
 }
